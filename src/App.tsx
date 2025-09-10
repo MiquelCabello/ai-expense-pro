@@ -8,7 +8,10 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import LandingPage from "./pages/LandingPage";
 import AuthPage from "./pages/AuthPage";
 import Dashboard from "./pages/Dashboard";
+// Debug import
+console.log('About to import UploadPage');
 import UploadPage from "./pages/UploadPage";
+console.log('UploadPage imported:', UploadPage);
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();

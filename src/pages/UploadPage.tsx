@@ -1,10 +1,13 @@
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/useAuth';
-import ReceiptUpload from '@/components/ReceiptUpload';
+// import ReceiptUpload from '@/components/ReceiptUpload';
 import { BarChart3, ArrowLeft } from 'lucide-react';
 
+console.log('UploadPage component being defined');
+
 export default function UploadPage() {
+  console.log('UploadPage component executing');
   const { profile, signOut } = useAuth();
   const navigate = useNavigate();
 
@@ -51,7 +54,13 @@ export default function UploadPage() {
       </header>
 
       <div className="container mx-auto px-4 py-8">
-        <ReceiptUpload onUploadComplete={handleUploadComplete} />
+        <div className="text-center">
+          <h2 className="text-2xl font-bold mb-4">Upload Page Test</h2>
+          <p>This is a simplified upload page to test the component loading.</p>
+          <Button onClick={handleUploadComplete} className="mt-4">
+            Go to Dashboard
+          </Button>
+        </div>
       </div>
     </div>
   );

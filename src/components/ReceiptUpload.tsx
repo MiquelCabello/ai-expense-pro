@@ -61,7 +61,10 @@ const paymentMethods = [
   { value: 'OTHER', label: 'Otro' }
 ];
 
+console.log('ReceiptUpload component being defined');
+
 export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) {
+  console.log('ReceiptUpload component executing');
   const { user, profile } = useAuth();
   const [step, setStep] = useState<'upload' | 'processing' | 'review'>('upload');
   const [file, setFile] = useState<File | null>(null);
