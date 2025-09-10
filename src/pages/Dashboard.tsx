@@ -312,10 +312,10 @@ export default function Dashboard() {
               <div className="text-center py-8 text-muted-foreground">
                 <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p>No hay gastos registrados aún</p>
-                <Button className="mt-4 bg-gradient-primary hover:opacity-90">
-                  <Upload className="mr-2 h-4 w-4" />
-                  Subir Primer Recibo
-                </Button>
+              <Button className="mt-4 bg-gradient-primary hover:opacity-90" onClick={() => window.location.href = '/upload'}>
+                <Upload className="mr-2 h-4 w-4" />
+                Subir Primer Recibo
+              </Button>
               </div>
             )}
           </CardContent>
@@ -331,7 +331,7 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Button className="h-auto p-6 flex flex-col items-center gap-3 bg-gradient-primary hover:opacity-90">
+              <Button className="h-auto p-6 flex flex-col items-center gap-3 bg-gradient-primary hover:opacity-90" onClick={() => window.location.href = '/upload'}>
                 <Upload className="h-8 w-8" />
                 <div className="text-center">
                   <div className="font-medium">Subir Recibo</div>

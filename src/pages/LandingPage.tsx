@@ -1,8 +1,8 @@
-import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Zap, Shield, BarChart3, CheckCircle, ArrowRight, Upload, Bot, Users } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 interface PricingPlan {
   name: string;
@@ -59,15 +59,15 @@ const pricingPlans: PricingPlan[] = [
 ];
 
 export default function LandingPage() {
-  const [showAuth, setShowAuth] = useState(false);
+  const navigate = useNavigate();
 
   const handleGetStarted = () => {
-    setShowAuth(true);
+    navigate('/auth');
   };
 
-  if (showAuth) {
-    return <AuthSection onBack={() => setShowAuth(false)} />;
-  }
+  const handleLogin = () => {
+    navigate('/auth');
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -85,7 +85,7 @@ export default function LandingPage() {
             </div>
             
             <div className="flex items-center space-x-4">
-              <Button variant="ghost" onClick={handleGetStarted}>
+              <Button variant="ghost" onClick={handleLogin}>
                 Iniciar Sesión
               </Button>
               <Button onClick={handleGetStarted} className="bg-gradient-primary hover:opacity-90">
@@ -267,45 +267,6 @@ export default function LandingPage() {
           </p>
         </div>
       </footer>
-    </div>
-  );
-}
-
-// Auth Section Component
-function AuthSection({ onBack }: { onBack: () => void }) {
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-primary-light via-background to-success-light flex items-center justify-center p-4">
-      <Card className="w-full max-w-md shadow-xl bg-gradient-card border-0">
-        <CardHeader className="text-center">
-          <div className="flex items-center justify-center space-x-2 mb-4">
-            <div className="bg-gradient-primary rounded-lg p-2">
-              <BarChart3 className="h-6 w-6 text-primary-foreground" />
-            </div>
-            <h1 className="text-2xl font-bold">ExpensePro AI</h1>
-          </div>
-          <CardTitle>Bienvenido</CardTitle>
-          <CardDescription>
-            Inicia sesión o crea tu cuenta para comenzar
-          </CardDescription>
-        </CardHeader>
-        
-        <CardContent className="space-y-4">
-          <div className="text-center text-muted-foreground">
-            <p>Sistema de autenticación próximamente...</p>
-            <p className="text-sm mt-2">La aplicación completa incluirá:</p>
-            <ul className="text-sm mt-2 space-y-1">
-              <li>• Registro e inicio de sesión</li>
-              <li>• Roles de Admin y Empleado</li>
-              <li>• Dashboard personalizado</li>
-              <li>• Procesamiento IA de recibos</li>
-            </ul>
-          </div>
-          
-          <Button variant="outline" onClick={onBack} className="w-full">
-            Volver al Inicio
-          </Button>
-        </CardContent>
-      </Card>
     </div>
   );
 }
