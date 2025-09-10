@@ -170,6 +170,7 @@ export type Database = {
           checksum_sha256: string
           created_at: string
           id: string
+          metadata: Json | null
           mime_type: string
           original_name: string
           size_bytes: number
@@ -180,6 +181,7 @@ export type Database = {
           checksum_sha256: string
           created_at?: string
           id?: string
+          metadata?: Json | null
           mime_type: string
           original_name: string
           size_bytes: number
@@ -190,6 +192,7 @@ export type Database = {
           checksum_sha256?: string
           created_at?: string
           id?: string
+          metadata?: Json | null
           mime_type?: string
           original_name?: string
           size_bytes?: number
