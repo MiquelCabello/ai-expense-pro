@@ -36,16 +36,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(session?.user ?? null);
         
         if (session?.user) {
-          // Fetch user profile
+          // Fetch user profile with error handling
           setTimeout(async () => {
-            const { data: profileData } = await supabase
-              .from('profiles')
-              .select('*')
-              .eq('user_id', session.user.id)
-              .maybeSingle();
-            
-            setProfile(profileData);
-            setLoading(false);
+            try {
+              const { data: profileData, error } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('user_id', session.user.id)
+                .maybeSingle();
+              
+              if (error) {
+                console.error('Error loading profile:', error);
+              }
+              
+              setProfile(profileData);
+            } catch (error) {
+              console.error('Profile fetch error:', error);
+              setProfile(null);
+            } finally {
+              setLoading(false);
+            }
           }, 0);
         } else {
           setProfile(null);
@@ -60,16 +70,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(session?.user ?? null);
       
       if (session?.user) {
-        // Fetch user profile
-        supabase
-          .from('profiles')
-          .select('*')
-          .eq('user_id', session.user.id)
-          .maybeSingle()
-          .then(({ data: profileData }) => {
+        // Fetch user profile with error handling
+        (async () => {
+          try {
+            const { data: profileData, error } = await supabase
+              .from('profiles')
+              .select('*')
+              .eq('user_id', session.user.id)
+              .maybeSingle();
+            
+            if (error) {
+              console.error('Error loading profile on init:', error);
+            }
             setProfile(profileData);
+          } catch (error) {
+            console.error('Profile fetch error on init:', error);
+            setProfile(null);
+          } finally {
             setLoading(false);
-          });
+          }
+        })();
       } else {
         setLoading(false);
       }
