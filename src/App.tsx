@@ -9,6 +9,7 @@ import LandingPage from "./pages/LandingPage";
 import AuthPage from "./pages/AuthPage";
 import RegistrationConfirmationPage from "./pages/RegistrationConfirmationPage";
 import Dashboard from "./pages/Dashboard";
+import ConfigurationPage from "./pages/ConfigurationPage";
 // Debug import
 console.log('About to import UploadPage');
 import UploadPage from "./pages/UploadPage";
@@ -86,6 +87,7 @@ const App = () => (
                   <Dashboard />
                 </ProtectedRoute>
               } />
+              <Route path="/configuracion" element={<ProtectedRoute><ConfigurationPage /></ProtectedRoute>} />
               <Route path="/upload" element={
                 <ProtectedRoute>
                   <UploadPage />

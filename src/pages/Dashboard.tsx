@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
+import AppLayout from '@/components/AppLayout';
 import { 
   Euro, 
   Clock, 
@@ -154,46 +155,8 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <div className="bg-gradient-primary rounded-lg p-2">
-                <BarChart3 className="h-6 w-6 text-primary-foreground" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold">ExpensePro AI</h1>
-                <p className="text-sm text-muted-foreground">
-                  Bienvenido, {profile?.name}
-                </p>
-              </div>
-            </div>
-            
-            <div className="flex items-center space-x-4">
-              <Badge variant="outline" className="gap-2">
-                {profile?.role === 'ADMIN' ? (
-                  <>
-                    <Users className="h-4 w-4" />
-                    Administrador
-                  </>
-                ) : (
-                  <>
-                    <FileText className="h-4 w-4" />
-                    Empleado
-                  </>
-                )}
-              </Badge>
-              <Button variant="outline" onClick={signOut}>
-                Cerrar Sesión
-              </Button>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <div className="container mx-auto px-4 py-8">
+    <AppLayout>
+      <div className="p-6 space-y-6">
         {/* Welcome Section */}
         <div className="mb-8">
           <h2 className="text-3xl font-bold mb-2">Dashboard Financiero</h2>
@@ -312,10 +275,10 @@ export default function Dashboard() {
               <div className="text-center py-8 text-muted-foreground">
                 <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p>No hay gastos registrados aún</p>
-              <Button className="mt-4 bg-gradient-primary hover:opacity-90" onClick={() => window.location.href = '/upload'}>
-                <Upload className="mr-2 h-4 w-4" />
-                Subir Primer Recibo
-              </Button>
+                <Button className="mt-4 bg-gradient-primary hover:opacity-90" onClick={() => window.location.href = '/upload'}>
+                  <Upload className="mr-2 h-4 w-4" />
+                  Subir Primer Recibo
+                </Button>
               </div>
             )}
           </CardContent>
@@ -358,6 +321,6 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </AppLayout>
   );
 }
