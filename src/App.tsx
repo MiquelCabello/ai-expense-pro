@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import LandingPage from "./pages/LandingPage";
 import AuthPage from "./pages/AuthPage";
+import RegistrationConfirmationPage from "./pages/RegistrationConfirmationPage";
 import Dashboard from "./pages/Dashboard";
 // Debug import
 console.log('About to import UploadPage');
@@ -79,6 +80,7 @@ const App = () => (
                   <AuthPage />
                 </PublicRoute>
               } />
+              <Route path="/registro-confirmacion" element={<RegistrationConfirmationPage />} />
               <Route path="/dashboard" element={
                 <ProtectedRoute>
                   <Dashboard />
