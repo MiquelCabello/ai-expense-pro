@@ -21,7 +21,27 @@ export default function AuthPage() {
     setLoading(true);
 
     try {
-      const redirectUrl = `${window.location.origin}/dashboard`;
+      // Check if user already exists
+      const { data: existingUser } = await supabase.auth.signInWithPassword({
+        email,
+        password: 'dummy-password-check'
+      });
+
+      if (existingUser) {
+        navigate('/registro-confirmacion?type=already_registered');
+        return;
+      }
+    } catch (error: any) {
+      // User doesn't exist or wrong password, continue with registration
+      if (!error.message.includes('Invalid login credentials')) {
+        toast.error(error.message);
+        setLoading(false);
+        return;
+      }
+    }
+
+    try {
+      const redirectUrl = `${window.location.origin}/auth`;
       
       const { error } = await supabase.auth.signUp({
         email,
@@ -29,15 +49,20 @@ export default function AuthPage() {
         options: {
           emailRedirectTo: redirectUrl,
           data: {
-            name: name
+            name: name,
+            role: 'ADMIN' // Set default role to ADMIN
           }
         }
       });
 
       if (error) {
-        toast.error(error.message);
+        if (error.message.includes('User already registered')) {
+          navigate('/registro-confirmacion?type=already_registered');
+        } else {
+          toast.error(error.message);
+        }
       } else {
-        toast.success('¡Registro exitoso! Revisa tu email para confirmar tu cuenta.');
+        navigate('/registro-confirmacion');
       }
     } catch (error: any) {
       toast.error(error.message);
