@@ -4,10 +4,7 @@ import { useAuth } from '@/hooks/useAuth';
 // import ReceiptUpload from '@/components/ReceiptUpload';
 import { BarChart3, ArrowLeft } from 'lucide-react';
 
-console.log('UploadPage component being defined');
-
 export default function UploadPage() {
-  console.log('UploadPage component executing');
   const { profile, signOut } = useAuth();
   const navigate = useNavigate();
 

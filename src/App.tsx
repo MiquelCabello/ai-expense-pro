@@ -10,10 +10,7 @@ import AuthPage from "./pages/AuthPage";
 import RegistrationConfirmationPage from "./pages/RegistrationConfirmationPage";
 import Dashboard from "./pages/Dashboard";
 import ConfigurationPage from "./pages/ConfigurationPage";
-// Debug import
-console.log('About to import UploadPage');
 import UploadPage from "./pages/UploadPage";
-console.log('UploadPage imported:', UploadPage);
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
