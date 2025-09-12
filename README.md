@@ -1,73 +1,126 @@
-# Welcome to your Lovable project
+# AI ExpensePro - Expense Management System
 
-## Project info
+A modern expense management application built with React, TypeScript, Tailwind CSS, and Supabase.
 
-**URL**: https://lovable.dev/projects/c89ddd1e-475c-441b-bded-496eee3bd2b2
+## Features
 
-## How can I edit this code?
+- 🔐 **Authentication & Authorization** - Secure login/register with role-based access
+- 📄 **Receipt Processing** - AI-powered receipt data extraction
+- 💰 **Expense Management** - Complete expense tracking and approval workflow
+- 👥 **User Management** - Admin panel for managing employees
+- 📊 **Analytics & Reports** - Comprehensive expense analytics
+- 🎨 **Modern UI** - Beautiful, responsive design with dark/light mode
 
-There are several ways of editing your application.
+## Tech Stack
 
-**Use Lovable**
+- **Frontend**: React 18, TypeScript, Tailwind CSS, shadcn/ui
+- **Backend**: Supabase (PostgreSQL, Auth, Storage, Edge Functions)
+- **Build Tool**: Vite
+- **Testing**: Vitest, React Testing Library
+- **Validation**: Zod
+- **Icons**: Lucide React
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/c89ddd1e-475c-441b-bded-496eee3bd2b2) and start prompting.
+## Getting Started
 
-Changes made via Lovable will be committed automatically to this repo.
+### Prerequisites
 
-**Use your preferred IDE**
+- Node.js 18+
+- npm or yarn
+- Supabase account
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+### Installation
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+1. Clone the repository:
+```bash
+git clone https://github.com/MiquelCabello/ai-expense-pro.git
+cd ai-expense-pro
+```
 
-Follow these steps:
+2. Install dependencies:
+```bash
+npm install
+```
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+3. Set up environment variables:
+```bash
+cp .env.example .env
+```
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+Fill in your Supabase credentials in the `.env` file.
 
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
+4. Start the development server:
+```bash
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+## Available Scripts
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+- `npm run dev` - Start development server
+- `npm run build` - Build for production
+- `npm run preview` - Preview production build locally
+- `npm run lint` - Run ESLint
+- `npm run typecheck` - Run TypeScript type checking
+- `npm run test` - Run unit tests
+- `npm run test:ui` - Run tests with UI
+- `npm run test:coverage` - Run tests with coverage report
 
-**Use GitHub Codespaces**
+## Project Structure
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+```
+src/
+├── components/          # Reusable UI components
+│   └── ui/             # shadcn/ui components
+├── hooks/              # Custom React hooks
+├── integrations/       # External service integrations
+│   └── supabase/      # Supabase client and types
+├── lib/               # Utility functions and configurations
+├── pages/             # Page components
+├── test/              # Test files and setup
+└── types/             # TypeScript type definitions
+```
 
-## What technologies are used for this project?
+## Database Schema
 
-This project is built with:
+The application uses Supabase PostgreSQL with the following main tables:
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+- `profiles` - User profiles and roles
+- `categories` - Expense categories
+- `expenses` - Expense records
+- `project_codes` - Project code assignments
+- `files` - File uploads metadata
+- `audit_logs` - System audit trail
 
-## How can I deploy this project?
+## Security Features
 
-Simply open [Lovable](https://lovable.dev/projects/c89ddd1e-475c-441b-bded-496eee3bd2b2) and click on Share -> Publish.
+- Row Level Security (RLS) policies
+- Input validation with Zod schemas
+- Content Security Policy (CSP)
+- File type validation for uploads
+- Rate limiting configurations
 
-## Can I connect a custom domain to my Lovable project?
+## Testing
 
-Yes, you can!
+The project includes comprehensive testing setup:
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+- Unit tests with Vitest
+- Component testing with React Testing Library
+- Mocking utilities for external dependencies
+- Coverage reporting
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+Run tests with:
+```bash
+npm run test
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests for new functionality
+5. Run the test suite
+6. Create a pull request
+
+## License
+
+This project is licensed under the MIT License.
