@@ -84,7 +84,11 @@ const App = () => (
                   <Dashboard />
                 </ProtectedRoute>
               } />
-              <Route path="/configuracion" element={<ProtectedRoute><ConfigurationPage /></ProtectedRoute>} />
+              <Route path="/configuracion" element={
+                <ProtectedRoute>
+                  <ConfigurationPage />
+                </ProtectedRoute>
+              } />
               <Route path="/upload" element={
                 <ProtectedRoute>
                   <UploadPage />

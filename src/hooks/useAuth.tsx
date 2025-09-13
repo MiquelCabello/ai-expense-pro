@@ -29,15 +29,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let mounted = true;
+    
     // Set up auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      (event, session) => {
+        if (!mounted) return;
+        
         setSession(session);
         setUser(session?.user ?? null);
         
         if (session?.user) {
-          // Fetch user profile with error handling
+          // Fetch user profile
           setTimeout(async () => {
+            if (!mounted) return;
+            
             try {
               const { data: profileData, error } = await supabase
                 .from('profiles')
@@ -45,33 +51,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 .eq('user_id', session.user.id)
                 .maybeSingle();
               
-              if (error) {
-                console.error('Error loading profile:', error);
+              if (mounted) {
+                setProfile(profileData);
+                setLoading(false);
               }
-              
-              setProfile(profileData);
             } catch (error) {
-              console.error('Profile fetch error:', error);
-              setProfile(null);
-            } finally {
-              setLoading(false);
+              if (mounted) {
+                setProfile(null);
+                setLoading(false);
+              }
             }
           }, 0);
         } else {
-          setProfile(null);
-          setLoading(false);
+          if (mounted) {
+            setProfile(null);
+            setLoading(false);
+          }
         }
       }
     );
 
     // Check for existing session
     supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!mounted) return;
+      
       setSession(session);
       setUser(session?.user ?? null);
       
       if (session?.user) {
-        // Fetch user profile with error handling
+        // Fetch user profile
         (async () => {
+          if (!mounted) return;
+          
           try {
             const { data: profileData, error } = await supabase
               .from('profiles')
@@ -79,23 +90,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               .eq('user_id', session.user.id)
               .maybeSingle();
             
-            if (error) {
-              console.error('Error loading profile on init:', error);
+            if (mounted) {
+              setProfile(profileData);
+              setLoading(false);
             }
-            setProfile(profileData);
           } catch (error) {
-            console.error('Profile fetch error on init:', error);
-            setProfile(null);
-          } finally {
-            setLoading(false);
+            if (mounted) {
+              setProfile(null);
+              setLoading(false);
+            }
           }
         })();
       } else {
-        setLoading(false);
+        if (mounted) {
+          setLoading(false);
+        }
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signOut = async () => {
