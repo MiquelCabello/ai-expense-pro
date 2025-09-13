@@ -21,27 +21,7 @@ export default function AuthPage() {
     setLoading(true);
 
     try {
-      // Check if user already exists
-      const { data: existingUser } = await supabase.auth.signInWithPassword({
-        email,
-        password: 'dummy-password-check'
-      });
-
-      if (existingUser) {
-        navigate('/registro-confirmacion?type=already_registered');
-        return;
-      }
-    } catch (error: any) {
-      // User doesn't exist or wrong password, continue with registration
-      if (!error.message.includes('Invalid login credentials')) {
-        toast.error(error.message);
-        setLoading(false);
-        return;
-      }
-    }
-
-    try {
-      const redirectUrl = `${window.location.origin}/auth`;
+      const redirectUrl = `${window.location.origin}/`;
       
       const { error } = await supabase.auth.signUp({
         email,
@@ -62,6 +42,7 @@ export default function AuthPage() {
           toast.error(error.message);
         }
       } else {
+        toast.success('¡Cuenta creada! Revisa tu email para confirmar.');
         navigate('/registro-confirmacion');
       }
     } catch (error: any) {

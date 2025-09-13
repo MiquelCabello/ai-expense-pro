@@ -92,22 +92,31 @@ export default function Dashboard() {
       }));
 
       // Calculate stats
-      const total = expensesWithProfiles.reduce((sum: number, exp: any) => sum + (typeof exp.amount_gross === 'string' ? parseFloat(exp.amount_gross) : exp.amount_gross), 0);
+      const total = expensesWithProfiles.reduce((sum: number, exp: any) => {
+        const amount = typeof exp.amount_gross === 'string' ? parseFloat(exp.amount_gross) : exp.amount_gross;
+        return sum + (isNaN(amount) ? 0 : amount);
+      }, 0);
+      
       const pending = expensesWithProfiles
         .filter((exp: any) => exp.status === 'PENDING')
-        .reduce((sum: number, exp: any) => sum + (typeof exp.amount_gross === 'string' ? parseFloat(exp.amount_gross) : exp.amount_gross), 0);
+        .reduce((sum: number, exp: any) => {
+          const amount = typeof exp.amount_gross === 'string' ? parseFloat(exp.amount_gross) : exp.amount_gross;
+          return sum + (isNaN(amount) ? 0 : amount);
+        }, 0);
+        
       const pendingCount = expensesWithProfiles.filter((exp: any) => exp.status === 'PENDING').length;
       
       // Get top category
       const categoryTotals = expensesWithProfiles.reduce((acc: Record<string, number>, exp: any) => {
         const category = exp.categories?.name || 'Otros';
         const amount = typeof exp.amount_gross === 'string' ? parseFloat(exp.amount_gross) : exp.amount_gross;
-        acc[category] = (acc[category] || 0) + amount;
+        const validAmount = isNaN(amount) ? 0 : amount;
+        acc[category] = (acc[category] || 0) + validAmount;
         return acc;
       }, {});
       
       const topCategory = Object.keys(categoryTotals).length > 0 
-        ? Object.entries(categoryTotals).sort(([,a], [,b]) => b - a)[0][0]
+        ? Object.entries(categoryTotals).sort(([,a], [,b]) => (b as number) - (a as number))[0][0]
         : '-';
 
       // Daily average (last 30 days)
@@ -117,7 +126,10 @@ export default function Dashboard() {
         new Date(exp.expense_date) >= thirtyDaysAgo
       );
       const dailyAverage = recentExpenses.length > 0 
-        ? recentExpenses.reduce((sum: number, exp: any) => sum + (typeof exp.amount_gross === 'string' ? parseFloat(exp.amount_gross) : exp.amount_gross), 0) / 30
+        ? recentExpenses.reduce((sum: number, exp: any) => {
+            const amount = typeof exp.amount_gross === 'string' ? parseFloat(exp.amount_gross) : exp.amount_gross;
+            return sum + (isNaN(amount) ? 0 : amount);
+          }, 0) / 30
         : 0;
 
       // Recent expenses (last 5)
@@ -134,7 +146,6 @@ export default function Dashboard() {
         recentExpenses: recent
       });
     } catch (error) {
-      console.error('Error fetching dashboard stats:', error);
       toast.error('Error cargando estadísticas');
     } finally {
       setLoading(false);
@@ -288,7 +299,11 @@ export default function Dashboard() {
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="font-semibold">{formatCurrency(typeof expense.amount_gross === 'string' ? parseFloat(expense.amount_gross) : expense.amount_gross)}</div>
+                      <div className="font-semibold">{formatCurrency(
+                        typeof expense.amount_gross === 'string' 
+                          ? parseFloat(expense.amount_gross) || 0 
+                          : expense.amount_gross || 0
+                      )}</div>
                       <div className="text-xs text-muted-foreground uppercase">{expense.currency}</div>
                     </div>
                   </div>
