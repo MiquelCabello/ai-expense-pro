@@ -106,9 +106,7 @@ export default function LandingPage() {
           </Badge>
           
           <h1 className="text-4xl md:text-6xl font-bold mb-6 bg-gradient-hero bg-clip-text text-transparent">
-            Gestión de Gastos
-            <br />
-            <span className="text-primary">Inteligente</span>
+            AI Expense Pro (local)
           </h1>
           
           <p className="text-xl text-muted-foreground mb-8 max-w-3xl mx-auto">
