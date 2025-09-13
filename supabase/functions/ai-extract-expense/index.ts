@@ -1,3 +1,4 @@
+// ...existing code...
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.2';
@@ -5,6 +6,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.2';
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Credentials': 'true'
 };
 
 interface ExpenseExtraction {
@@ -15,9 +18,15 @@ interface ExpenseExtraction {
   amount_net: number;
   currency: string;
   category_suggestion: string;
-  payment_method_guess: string;
+  payment_method_guess: string | null;
   project_code_guess: string | null;
   notes: string | null;
+}
+
+async function sha256Hex(buffer: ArrayBuffer) {
+  const hash = await crypto.subtle.digest('SHA-256', buffer);
+  const bytes = new Uint8Array(hash);
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 serve(async (req) => {
@@ -43,14 +52,20 @@ serve(async (req) => {
 
     // Parse form data
     const formData = await req.formData();
-    const file = formData.get('file') as File;
-    const userId = formData.get('userId') as string;
+    const file = formData.get('file') as File | null;
+    const userId = formData.get('userId') as string | null;
 
     if (!file || !userId) {
       throw new Error('File and userId are required');
     }
 
-    console.log(`Processing file: ${file.name}, size: ${file.size}, type: ${file.type}`);
+    console.log(JSON.stringify({
+      event: 'ai-extract:start',
+      filename: file.name,
+      size: file.size,
+      type: file.type,
+      userId
+    }));
 
     // Validate file type and size
     const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf'];
@@ -64,9 +79,52 @@ serve(async (req) => {
       throw new Error('El archivo es demasiado grande. Máximo 10MB.');
     }
 
-    // Convert file to base64
+    // Read bytes and compute checksum (idempotencia básica - lectura solamente)
     const bytes = await file.arrayBuffer();
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(bytes)));
+    const checksum = await sha256Hex(bytes);
+
+    // Check existing file record by checksum (read-only, no schema changes)
+    const { data: existingFiles, error: filesError } = await supabase
+      .from('files')
+      .select('*')
+      .eq('checksum_sha256', checksum)
+      .limit(1);
+
+    if (filesError) {
+      console.warn('Warning checking existing files by checksum', filesError);
+    }
+
+    if (existingFiles && existingFiles.length > 0) {
+      const fileRecord = existingFiles[0];
+      // Try to find an expense already linked to this file
+      const { data: existingExpenses } = await supabase
+        .from('expenses')
+        .select('*')
+        .eq('receipt_file_id', fileRecord.id)
+        .limit(1);
+
+      if (existingExpenses && existingExpenses.length > 0) {
+        // Return existing expense data to avoid duplicate processing
+        console.log('Found existing expense linked to checksum, returning it (idempotent response).', { expenseId: existingExpenses[0].id });
+        return new Response(JSON.stringify({
+          success: true,
+          idempotent: true,
+          data: existingExpenses[0]
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+    }
+
+    // Convert file to base64
+    // Use robust base64 conversion
+    const uint8 = new Uint8Array(bytes);
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let i = 0; i < uint8.length; i += chunkSize) {
+      binary += String.fromCharCode.apply(null, Array.from(uint8.subarray(i, i + chunkSize)));
+    }
+    const base64 = btoa(binary);
 
     // Prepare Gemini API request
     const prompt = `Eres un sistema experto financiero especializado en extraer datos de tickets y recibos españoles. 
@@ -170,13 +228,13 @@ serve(async (req) => {
     }
 
     // Financial validation
-    const calculatedGross = extractedData.amount_net + extractedData.tax_vat;
+    const calculatedGross = extractedData.amount_net + (extractedData.tax_vat || 0);
     const difference = Math.abs(calculatedGross - extractedData.amount_gross);
     
     if (difference > 0.01) {
       console.warn(`Financial inconsistency detected: net(${extractedData.amount_net}) + vat(${extractedData.tax_vat}) != gross(${extractedData.amount_gross})`);
       // Auto-correct: recalculate net amount
-      extractedData.amount_net = extractedData.amount_gross - extractedData.tax_vat;
+      extractedData.amount_net = extractedData.amount_gross - (extractedData.tax_vat || 0);
     }
 
     // Set defaults
@@ -197,8 +255,8 @@ serve(async (req) => {
     
     return new Response(JSON.stringify({
       success: false,
-      error: error.message,
-      details: error.stack
+      error: (error as Error).message,
+      details: (error as Error).stack
     }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

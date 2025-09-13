@@ -1,3 +1,4 @@
+// ...existing code...
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -53,10 +54,11 @@ export default function Dashboard() {
       // Get expenses based on user role
       let expenseQuery = supabase
         .from('expenses')
+        // Removed direct 'profiles(name)' join to avoid errors if relationship not defined.
+        // We'll fetch profiles separately and attach them to expenses (read-only).
         .select(`
           *,
-          categories(name),
-          profiles(name)
+          categories(name)
         `);
 
       // If employee, only show their expenses
@@ -65,51 +67,72 @@ export default function Dashboard() {
       }
 
       const { data: expenses } = await expenseQuery;
-
-      if (expenses) {
-        // Calculate stats
-        const total = expenses.reduce((sum, exp) => sum + (typeof exp.amount_gross === 'string' ? parseFloat(exp.amount_gross) : exp.amount_gross), 0);
-        const pending = expenses
-          .filter(exp => exp.status === 'PENDING')
-          .reduce((sum, exp) => sum + (typeof exp.amount_gross === 'string' ? parseFloat(exp.amount_gross) : exp.amount_gross), 0);
-        const pendingCount = expenses.filter(exp => exp.status === 'PENDING').length;
-        
-        // Get top category
-        const categoryTotals = expenses.reduce((acc, exp) => {
-          const category = exp.categories?.name || 'Otros';
-          const amount = typeof exp.amount_gross === 'string' ? parseFloat(exp.amount_gross) : exp.amount_gross;
-          acc[category] = (acc[category] || 0) + amount;
-          return acc;
-        }, {} as Record<string, number>);
-        
-        const topCategory = Object.keys(categoryTotals).length > 0 
-          ? Object.entries(categoryTotals).sort(([,a], [,b]) => b - a)[0][0]
-          : '-';
-
-        // Daily average (last 30 days)
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        const recentExpenses = expenses.filter(exp => 
-          new Date(exp.expense_date) >= thirtyDaysAgo
-        );
-        const dailyAverage = recentExpenses.length > 0 
-          ? recentExpenses.reduce((sum, exp) => sum + (typeof exp.amount_gross === 'string' ? parseFloat(exp.amount_gross) : exp.amount_gross), 0) / 30
-          : 0;
-
-        // Recent expenses (last 5)
-        const recent = expenses
-          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-          .slice(0, 5);
-
-        setStats({
-          totalExpenses: total,
-          pendingExpenses: pending,
-          pendingCount,
-          topCategory,
-          dailyAverage,
-          recentExpenses: recent
-        });
+      if (!expenses) {
+        setStats(s => ({ ...s, recentExpenses: [] }));
+        return;
       }
+
+      // Fetch profiles for employee_ids present in the expenses (only if needed)
+      const employeeIds = Array.from(new Set(expenses.map((e: any) => e.employee_id).filter(Boolean)));
+      let profilesMap: Record<string, any> = {};
+      if (employeeIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('user_id, name')
+          .in('user_id', employeeIds);
+        if (profiles && profiles.length > 0) {
+          profilesMap = Object.fromEntries(profiles.map((p: any) => [p.user_id, p]));
+        }
+      }
+
+      // Attach profiles info to expenses for backwards compatibility with UI
+      const expensesWithProfiles = expenses.map((exp: any) => ({
+        ...exp,
+        profiles: profilesMap[exp.employee_id] || null
+      }));
+
+      // Calculate stats
+      const total = expensesWithProfiles.reduce((sum: number, exp: any) => sum + (typeof exp.amount_gross === 'string' ? parseFloat(exp.amount_gross) : exp.amount_gross), 0);
+      const pending = expensesWithProfiles
+        .filter((exp: any) => exp.status === 'PENDING')
+        .reduce((sum: number, exp: any) => sum + (typeof exp.amount_gross === 'string' ? parseFloat(exp.amount_gross) : exp.amount_gross), 0);
+      const pendingCount = expensesWithProfiles.filter((exp: any) => exp.status === 'PENDING').length;
+      
+      // Get top category
+      const categoryTotals = expensesWithProfiles.reduce((acc: Record<string, number>, exp: any) => {
+        const category = exp.categories?.name || 'Otros';
+        const amount = typeof exp.amount_gross === 'string' ? parseFloat(exp.amount_gross) : exp.amount_gross;
+        acc[category] = (acc[category] || 0) + amount;
+        return acc;
+      }, {});
+      
+      const topCategory = Object.keys(categoryTotals).length > 0 
+        ? Object.entries(categoryTotals).sort(([,a], [,b]) => b - a)[0][0]
+        : '-';
+
+      // Daily average (last 30 days)
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      const recentExpenses = expensesWithProfiles.filter((exp: any) => 
+        new Date(exp.expense_date) >= thirtyDaysAgo
+      );
+      const dailyAverage = recentExpenses.length > 0 
+        ? recentExpenses.reduce((sum: number, exp: any) => sum + (typeof exp.amount_gross === 'string' ? parseFloat(exp.amount_gross) : exp.amount_gross), 0) / 30
+        : 0;
+
+      // Recent expenses (last 5)
+      const recent = expensesWithProfiles
+        .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 5);
+
+      setStats({
+        totalExpenses: total,
+        pendingExpenses: pending,
+        pendingCount,
+        topCategory,
+        dailyAverage,
+        recentExpenses: recent
+      });
     } catch (error) {
       console.error('Error fetching dashboard stats:', error);
       toast.error('Error cargando estadísticas');
