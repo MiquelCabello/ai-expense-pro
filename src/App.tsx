@@ -9,6 +9,9 @@ import LandingPage from "./pages/LandingPage";
 import AuthPage from "./pages/AuthPage";
 import RegistrationConfirmationPage from "./pages/RegistrationConfirmationPage";
 import Dashboard from "./pages/Dashboard";
+import ExpensesPage from "./pages/ExpensesPage";
+import AnalyticsPage from "./pages/AnalyticsPage";
+import EmployeesPage from "./pages/EmployeesPage";
 import ConfigurationPage from "./pages/ConfigurationPage";
 import UploadPage from "./pages/UploadPage";
 import NotFound from "./pages/NotFound";
@@ -82,6 +85,21 @@ const App = () => (
               <Route path="/dashboard" element={
                 <ProtectedRoute>
                   <Dashboard />
+                </ProtectedRoute>
+              } />
+              <Route path="/gastos" element={
+                <ProtectedRoute>
+                  <ExpensesPage />
+                </ProtectedRoute>
+              } />
+              <Route path="/analisis" element={
+                <ProtectedRoute>
+                  <AnalyticsPage />
+                </ProtectedRoute>
+              } />
+              <Route path="/empleados" element={
+                <ProtectedRoute>
+                  <EmployeesPage />
                 </ProtectedRoute>
               } />
               <Route path="/configuracion" element={
