@@ -8,11 +8,12 @@ import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/hooks/useAuth';
-import { Settings, Euro, Globe, Clock, Palette, FolderOpen, Briefcase, Plus, Edit2 } from 'lucide-react';
+import { Settings, Euro, Globe, Clock, Palette, FolderOpen, Briefcase, Plus, Edit2, Trash2 } from 'lucide-react';
 
 interface Category {
   id: string;
@@ -204,6 +205,38 @@ export default function ConfigurationPage() {
     }
   };
 
+  const handleDeleteCategory = async (categoryId: string, categoryName: string) => {
+    try {
+      const { error } = await supabase
+        .from('categories')
+        .delete()
+        .eq('id', categoryId);
+
+      if (error) throw error;
+
+      toast.success(`Categoría "${categoryName}" eliminada correctamente`);
+      loadData();
+    } catch (error) {
+      toast.error('Error al eliminar categoría');
+    }
+  };
+
+  const handleDeleteProject = async (projectId: string, projectCode: string) => {
+    try {
+      const { error } = await supabase
+        .from('project_codes')
+        .update({ status: 'INACTIVE' })
+        .eq('id', projectId);
+
+      if (error) throw error;
+
+      toast.success(`Código de proyecto "${projectCode}" desactivado correctamente`);
+      loadData();
+    } catch (error) {
+      toast.error('Error al desactivar código de proyecto');
+    }
+  };
+
   if (loading) {
     return (
       <AppLayout>
@@ -371,51 +404,80 @@ export default function ConfigurationPage() {
                       </Badge>
                     )}
                   </div>
-                  <Dialog open={editingCategory?.id === category.id} onOpenChange={(open) => !open && setEditingCategory(null)}>
-                    <DialogTrigger asChild>
-                      <Button variant="outline" size="sm" onClick={() => handleEditCategory(category)}>
-                        <Edit2 className="h-4 w-4 mr-1" />
-                        Editar
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader>
-                        <DialogTitle>Editar Categoría</DialogTitle>
-                        <DialogDescription>
-                          Modifica los datos de la categoría
-                        </DialogDescription>
-                      </DialogHeader>
-                      <div className="space-y-4">
-                        <div>
-                          <Label htmlFor="category-name">Nombre</Label>
-                          <Input
-                            id="category-name"
-                            value={newCategoryName}
-                            onChange={(e) => setNewCategoryName(e.target.value)}
-                            placeholder="Nombre de la categoría"
-                          />
+                  <div className="flex space-x-2">
+                    <Dialog open={editingCategory?.id === category.id} onOpenChange={(open) => !open && setEditingCategory(null)}>
+                      <DialogTrigger asChild>
+                        <Button variant="outline" size="sm" onClick={() => handleEditCategory(category)}>
+                          <Edit2 className="h-4 w-4 mr-1" />
+                          Editar
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>Editar Categoría</DialogTitle>
+                          <DialogDescription>
+                            Modifica los datos de la categoría
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4">
+                          <div>
+                            <Label htmlFor="category-name">Nombre</Label>
+                            <Input
+                              id="category-name"
+                              value={newCategoryName}
+                              onChange={(e) => setNewCategoryName(e.target.value)}
+                              placeholder="Nombre de la categoría"
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="category-budget">Presupuesto Mensual (€)</Label>
+                            <Input
+                              id="category-budget"
+                              type="number"
+                              value={newCategoryBudget}
+                              onChange={(e) => setNewCategoryBudget(e.target.value)}
+                              placeholder="0"
+                            />
+                          </div>
+                          <div className="flex justify-end space-x-2">
+                            <Button variant="outline" onClick={() => setEditingCategory(null)}>
+                              Cancelar
+                            </Button>
+                            <Button onClick={handleUpdateCategory}>
+                              Guardar
+                            </Button>
+                          </div>
                         </div>
-                        <div>
-                          <Label htmlFor="category-budget">Presupuesto Mensual (€)</Label>
-                          <Input
-                            id="category-budget"
-                            type="number"
-                            value={newCategoryBudget}
-                            onChange={(e) => setNewCategoryBudget(e.target.value)}
-                            placeholder="0"
-                          />
-                        </div>
-                        <div className="flex justify-end space-x-2">
-                          <Button variant="outline" onClick={() => setEditingCategory(null)}>
-                            Cancelar
-                          </Button>
-                          <Button onClick={handleUpdateCategory}>
-                            Guardar
-                          </Button>
-                        </div>
-                      </div>
-                    </DialogContent>
-                  </Dialog>
+                      </DialogContent>
+                    </Dialog>
+                    
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="destructive" size="sm">
+                          <Trash2 className="h-4 w-4 mr-1" />
+                          Eliminar
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Esta acción eliminará permanentemente la categoría "{category.name}". 
+                            Esta acción no se puede deshacer.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={() => handleDeleteCategory(category.id, category.name)}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          >
+                            Eliminar
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
                 </div>
               ))}
               
@@ -487,50 +549,79 @@ export default function ConfigurationPage() {
                     <div className="font-medium">{project.code}</div>
                     <div className="text-sm text-muted-foreground">{project.name}</div>
                   </div>
-                  <Dialog open={editingProject?.id === project.id} onOpenChange={(open) => !open && setEditingProject(null)}>
-                    <DialogTrigger asChild>
-                      <Button variant="outline" size="sm" onClick={() => handleEditProject(project)}>
-                        <Edit2 className="h-4 w-4 mr-1" />
-                        Editar
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader>
-                        <DialogTitle>Editar Código de Proyecto</DialogTitle>
-                        <DialogDescription>
-                          Modifica los datos del código de proyecto
-                        </DialogDescription>
-                      </DialogHeader>
-                      <div className="space-y-4">
-                        <div>
-                          <Label htmlFor="project-code">Código</Label>
-                          <Input
-                            id="project-code"
-                            value={newProjectCode}
-                            onChange={(e) => setNewProjectCode(e.target.value)}
-                            placeholder="Código del proyecto"
-                          />
+                  <div className="flex space-x-2">
+                    <Dialog open={editingProject?.id === project.id} onOpenChange={(open) => !open && setEditingProject(null)}>
+                      <DialogTrigger asChild>
+                        <Button variant="outline" size="sm" onClick={() => handleEditProject(project)}>
+                          <Edit2 className="h-4 w-4 mr-1" />
+                          Editar
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>Editar Código de Proyecto</DialogTitle>
+                          <DialogDescription>
+                            Modifica los datos del código de proyecto
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4">
+                          <div>
+                            <Label htmlFor="project-code">Código</Label>
+                            <Input
+                              id="project-code"
+                              value={newProjectCode}
+                              onChange={(e) => setNewProjectCode(e.target.value)}
+                              placeholder="Código del proyecto"
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="project-name">Nombre</Label>
+                            <Input
+                              id="project-name"
+                              value={newProjectName}
+                              onChange={(e) => setNewProjectName(e.target.value)}
+                              placeholder="Nombre del proyecto"
+                            />
+                          </div>
+                          <div className="flex justify-end space-x-2">
+                            <Button variant="outline" onClick={() => setEditingProject(null)}>
+                              Cancelar
+                            </Button>
+                            <Button onClick={handleUpdateProject}>
+                              Guardar
+                            </Button>
+                          </div>
                         </div>
-                        <div>
-                          <Label htmlFor="project-name">Nombre</Label>
-                          <Input
-                            id="project-name"
-                            value={newProjectName}
-                            onChange={(e) => setNewProjectName(e.target.value)}
-                            placeholder="Nombre del proyecto"
-                          />
-                        </div>
-                        <div className="flex justify-end space-x-2">
-                          <Button variant="outline" onClick={() => setEditingProject(null)}>
-                            Cancelar
-                          </Button>
-                          <Button onClick={handleUpdateProject}>
-                            Guardar
-                          </Button>
-                        </div>
-                      </div>
-                    </DialogContent>
-                  </Dialog>
+                      </DialogContent>
+                    </Dialog>
+                    
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="destructive" size="sm">
+                          <Trash2 className="h-4 w-4 mr-1" />
+                          Desactivar
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Esta acción desactivará el código de proyecto "{project.code}". 
+                            No podrá ser utilizado en nuevos gastos.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={() => handleDeleteProject(project.id, project.code)}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          >
+                            Desactivar
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
                 </div>
               ))}
               
