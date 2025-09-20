@@ -1,242 +1,232 @@
-// Ruta: supabase/functions/extract-receipt/index.ts
-// Descripción: Edge Function que descarga el archivo (Storage o FormData), llama a Gemini y devuelve JSON normalizado.
-// Anotaciones: Usa SERVICE ROLE para leer Storage y errores con código.
+// Ruta: supabase/functions/ai-extract-expense/index.ts
+// Descripción: Edge Function (Gemini) con detección reforzada
+//  - Acepta FormData (file + userId) o JSON (file_url)
+//  - Pide JSON y también usa texto bruto (raw_text)
+//  - Detecta tax_id con y sin separadores; detecta invoice_number desde texto
+//  - Regla: FACTURA si tax_id || invoice_number; si no, TICKET
+//  - Devuelve { success: true, data }
 
-import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { encode as base64Encode } from "https://deno.land/std@0.224.0/encoding/base64.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
-// ——— Utils ———
-const cors = (origin?: string) => ({
-  "Access-Control-Allow-Origin": origin || "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  Vary: "Origin",
-});
+const json = (body: unknown, init: ResponseInit = {}) =>
+  new Response(JSON.stringify(body), {
+    headers: { "Content-Type": "application/json", ...(init.headers || {}) },
+    status: init.status ?? 200,
+  })
 
-const normalizeCurrency = (cur?: string) =>
-  (cur || "EUR").toString().trim().toUpperCase().slice(0, 3);
+async function fileToBase64(file: File): Promise<{ base64: string; mime: string }> {
+  const buf = await file.arrayBuffer()
+  const bytes = new Uint8Array(buf)
+  let bin = ''
+  for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i])
+  return { base64: btoa(bin), mime: file.type || 'application/octet-stream' }
+}
 
-const parseNumber = (n: unknown): number | undefined => {
-  if (typeof n === "number" && isFinite(n)) return n;
-  if (typeof n === "string") {
-    const s = n.replace(/[^0-9.,-]/g, "").replace(/,/g, ".");
-    const v = Number(s);
-    return isFinite(v) ? v : undefined;
+async function urlToBase64(url: string): Promise<{ base64: string; mime: string }> {
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`FETCH_FILE_URL_FAILED:${res.status}`)
+  const mime = res.headers.get('content-type') || 'application/octet-stream'
+  const buf = await res.arrayBuffer()
+  const bytes = new Uint8Array(buf)
+  let bin = ''
+  for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i])
+  return { base64: btoa(bin), mime }
+}
+
+function normalizeNumber(val: unknown): number | undefined {
+  if (val === undefined || val === null || val === '') return undefined
+  if (typeof val === 'number' && Number.isFinite(val)) return val
+  let s = String(val).trim().replace(/[^0-9,.-]/g, '')
+  if (!s) return undefined
+  const lastComma = s.lastIndexOf(',')
+  const lastDot = s.lastIndexOf('.')
+  if (lastComma > -1 && lastDot > -1) s = lastComma > lastDot ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '')
+  else if (lastComma > -1) s = s.replace(/\./g, '').replace(',', '.')
+  else s = s.replace(/,/g, '')
+  const n = Number(s)
+  return Number.isFinite(n) ? n : undefined
+}
+
+function toISO(val: unknown): string {
+  if (!val) return ''
+  const s = String(val)
+  let m = s.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/)
+  if (m) { const [, y, mo, d] = m; return `${y}-${String(+mo).padStart(2,'0')}-${String(+d).padStart(2,'0')}` }
+  m = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/)
+  if (m) { const [, d, mo, y] = m; return `${y}-${String(+mo).padStart(2,'0')}-${String(+d).padStart(2,'0')}` }
+  const t = Date.parse(s)
+  if (!Number.isNaN(t)) { const dt = new Date(t); return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}` }
+  return ''
+}
+
+function pick(obj: any, ...keys: string[]) {
+  for (const k of keys) {
+    const parts = k.split('.')
+    let cur = obj
+    for (const p of parts) cur = cur?.[p]
+    if (cur !== undefined && cur !== null && cur !== '') return cur
   }
-  return undefined;
-};
+  return undefined
+}
 
-const toISODate = (input?: string): string | undefined => {
-  if (!input) return undefined;
-  const s = input.trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
-  if (m) {
-    const d = m[1].padStart(2, "0");
-    const mo = m[2].padStart(2, "0");
-    const yRaw = m[3];
-    const y = yRaw.length === 2 ? (Number(yRaw) < 50 ? "20" + yRaw : "19" + yRaw) : yRaw;
-    return `${y}-${mo}-${d}`;
-  }
-  const dt = new Date(s);
-  if (!isNaN(dt.getTime())) {
-    const y = dt.getFullYear();
-    const mo = String(dt.getMonth() + 1).padStart(2, "0");
-    const d = String(dt.getDate()).padStart(2, "0");
-    return `${y}-${mo}-${d}`;
-  }
-  return undefined;
-};
+// === Detección fiscal ===
+function detectTaxId(text?: string): string | undefined {
+  if (!text) return undefined
+  // 1) Patrones que permiten espacios/guiones/puntos
+  const rawPatterns: RegExp[] = [
+    /\b([ABCDEFGHJKLMNPQRSUVW]\s?[.\-\s]?\d{7}\s?[.\-\s]?[A-Z0-9])\b/i, // CIF
+    /\b(\d{8}\s?[.\-\s]?[A-Z])\b/i,                                      // NIF
+    /\b([XYZ]\s?[.\-\s]?\d{7}\s?[.\-\s]?[A-Z])\b/i,                     // NIE
+    /\b([A-Z]{2}\s?[.\-\s]?[A-Z0-9]{8,12})\b/i,                            // VAT UE (ESB..., ES B ...)
+    /\b([A-Z&Ñ]{3,4}\s?[.\-\s]?[0-9]{6}\s?[.\-\s]?[A-Z0-9]{3})\b/i,     // RFC MX
+    /\b(\d{1,3}\.\d{3}\.\d{3}-[\dkK])\b/,                               // RUT CL
+    /\b(\d{2}-?\d{8}-?\d)\b/,                                             // CUIT AR
+  ]
+  for (const re of rawPatterns) { const m = text.match(re); if (m) return m[1].replace(/[\s.\-]/g, '') }
 
-const detectDocType = (ai: any): "TICKET" | "FACTURA" => {
-  const t = (ai?.type || ai?.kind || "").toString().toUpperCase();
-  if (t === "TICKET" || t === "FACTURA") return t as any;
-  if (ai?.invoice_number || ai?.tax_id) return "FACTURA";
-  return "TICKET";
-};
+  // 2) Versión sin separadores
+  const sanitized = text.replace(/[\s.\-]/g, '')
+  const cleanPatterns: RegExp[] = [
+    /\b([ABCDEFGHJKLMNPQRSUVW]\d{7}[A-Z0-9])\b/i,
+    /\b(\d{8}[A-Z])\b/i,
+    /\b([XYZ]\d{7}[A-Z])\b/i,
+    /\b([A-Z]{2}[A-Z0-9]{8,12})\b/i,
+    /\b([A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3})\b/i,
+    /\b(\d{2}\d{8}\d)\b/,
+    /\b([A-Z0-9]{8,15})\b/i,
+  ]
+  for (const re of cleanPatterns) { const m = sanitized.match(re); if (m) return m[1] }
+  return undefined
+}
 
-const safeJsonParse = (text: string): any => {
-  const first = text.indexOf("{");
-  const last = text.lastIndexOf("}");
-  if (first >= 0 && last > first) {
-    const slice = text.slice(first, last + 1);
-    try {
-      return JSON.parse(slice);
-    } catch {}
-    const cleaned = slice
-      .replace(/^```[a-z]*\n?/i, "")
-      .replace(/```$/i, "")
-      .replace(/,\s*([}\]])/g, "$1");
-    return JSON.parse(cleaned);
-  }
-  return JSON.parse(text);
-};
+function detectInvoiceNumber(text?: string): string | undefined {
+  if (!text) return undefined
+  const patterns: RegExp[] = [
+    /factur[a|o]\s*(?:n[ºo°]\s*|n\.?\s*|num(?:ero)?\s*|#|:)?\s*([A-Z0-9][A-Z0-9_.\-\/]{2,24})/i,
+    /invoice\s*(?:no\.?|number|n[ºo°]|#|:)?\s*([A-Z0-9][A-Z0-9_.\-\/]{2,24})/i,
+    /\b(?:n[ºo°]|no\.|n\.)\s*(?:de\s*factura)?\s*[:#-]?\s*([A-Z0-9][A-Z0-9_.\-\/]{3,24})/i,
+  ]
+  for (const re of patterns) { const m = text.match(re); if (m) return m[1] }
+  return undefined
+}
 
-// ——— Gemini ———
-async function callGemini(apiKey: string, fileBytes: Uint8Array, mime: string) {
-  const endpoint =
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-  const base64 = base64Encode(fileBytes);
-  const prompt =
-    "Analiza si es ticket o factura y devuelve SOLO JSON. Estructura: {" +
-    "type:'TICKET|FACTURA',vendor:string,expense_date:'YYYY-MM-DD',currency:'ISO'," +
-    "amount_gross:number,amount_net:number,tax_vat:number,category_guess:string," +
-    "invoice_number?:string,tax_id?:string,address?:string,email?:string,notes?:string}";
+// === Normalización ===
+function normalizeAI(raw: any, rawText?: string) {
+  const src = raw?.data ?? raw
+  const vendor = pick(src, 'vendor', 'merchant', 'commerce', 'company', 'company_name') ?? ''
+  const expense_date = toISO(pick(src, 'expense_date', 'date', 'purchase_date', 'invoice_date') ?? '')
+  const amount_gross = normalizeNumber(pick(src, 'amount_gross', 'total', 'total_amount', 'amount')) ?? 0
+  const tax_vat = normalizeNumber(pick(src, 'tax_vat', 'vat', 'tax', 'iva')) ?? 0
+  const amount_net = normalizeNumber(pick(src, 'amount_net', 'net')) ?? (amount_gross && tax_vat ? amount_gross - tax_vat : 0)
+  const currency = (pick(src, 'currency', 'currency_code') ?? 'EUR') as string
+  const notes = (pick(src, 'notes', 'comment', 'description') ?? '') as string
+  const category_guess = (pick(src, 'category_guess', 'category_suggestion', 'category') ?? '') as string
 
-  const body = {
-    contents: [
-      {
-        role: "user",
-        parts: [{ text: prompt }, { inline_data: { mime_type: mime, data: base64 } }],
-      },
-    ],
-    generationConfig: { response_mime_type: "application/json" },
-  } as any;
+  let invoice_number = pick(src, 'invoice_number', 'invoiceNo', 'invoice_no', 'n_factura')
+  let tax_id = pick(src, 'tax_id', 'cif', 'nif', 'vat_id', 'company_tax_id', 'fiscal_id', 'rfc', 'rut', 'cuit')
 
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const errText = await res.text();
-    throw { code: "GEMINI_ERROR", status: res.status, detail: errText };
-  }
-  const json = await res.json();
-  const text = json?.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
-  try {
-    return safeJsonParse(text);
-  } catch (e) {
-    throw { code: "PARSE_ERROR", detail: String(e) };
+  const possibleText = [pick(src, 'raw_text', 'full_text', 'text'), notes, rawText].filter(Boolean).join('\n')
+  if (!invoice_number) invoice_number = detectInvoiceNumber(possibleText)
+  if (!tax_id) tax_id = detectTaxId(possibleText)
+
+  const address = pick(src, 'address', 'company_address')
+  const email = pick(src, 'email', 'company_email')
+
+  const type = (invoice_number || tax_id) ? 'FACTURA' : 'TICKET'
+
+  return {
+    vendor: String(vendor || ''),
+    expense_date,
+    amount_gross: Number(amount_gross || 0),
+    tax_vat: Number(tax_vat || 0),
+    amount_net: Number(amount_net || 0),
+    currency: String(currency || 'EUR'),
+    category_guess: category_guess || undefined,
+    category_suggestion: category_guess || undefined,
+    notes: String(notes || ''),
+    type, kind: type,
+    invoice_number: invoice_number ? String(invoice_number) : undefined,
+    tax_id: tax_id ? String(tax_id) : undefined,
+    address: address ? String(address) : undefined,
+    email: email ? String(email) : undefined,
   }
 }
 
-// ——— Body reader: JSON (Storage) o multipart (archivo directo) ———
-async function readFileFromRequest(
-  req: Request,
-  sb: ReturnType<typeof createClient>,
-) {
-  const ctype = req.headers.get("content-type")?.toLowerCase() || "";
-  if (ctype.includes("application/json")) {
-    const { file_path, file_type } = await req.json();
-    if (!file_path) throw { code: "BAD_REQUEST", detail: "file_path required" };
-    const { data: blob, error } = await sb.storage.from("receipts").download(file_path);
-    if (error || !blob)
-      throw { code: "DOWNLOAD_ERROR", detail: error?.message || "download failed" };
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    return { bytes, mime: file_type || blob.type || "application/octet-stream" };
-  }
-  if (ctype.includes("multipart/form-data")) {
-    const form = await req.formData();
-    const file = form.get("file") as File | null;
-    if (file) {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      return { bytes, mime: file.type || "application/octet-stream" };
-    }
-    const file_path = form.get("file_path")?.toString();
-    const file_type = form.get("file_type")?.toString();
-    if (file_path) {
-      const { data: blob, error } = await sb.storage
-        .from("receipts")
-        .download(file_path);
-      if (error || !blob)
-        throw { code: "DOWNLOAD_ERROR", detail: error?.message || "download failed" };
-      const bytes = new Uint8Array(await blob.arrayBuffer());
-      return { bytes, mime: file_type || blob.type || "application/octet-stream" };
-    }
-    throw { code: "BAD_REQUEST", detail: "file or file_path required" };
-  }
-  throw { code: "BAD_REQUEST", detail: "unsupported content-type" };
+// === Gemini ===
+async function callGemini(args: { base64: string; mime: string; apiKey: string }) {
+  const { base64, mime, apiKey } = args
+  const prompt = `Eres un extractor de datos de tickets/facturas.
+Devuelve SOLO un objeto JSON con EXACTAMENTE estas claves (si no sabes alguna, usa null):
+{
+  "vendor": string|null,
+  "expense_date": string|null, // YYYY-MM-DD si puedes
+  "amount_gross": number|null,
+  "tax_vat": number|null,
+  "amount_net": number|null,
+  "currency": string|null,
+  "category_guess": string|null,
+  "invoice_number": string|null, // ej. F253282, 2024/001, FAC-2024-0001
+  "tax_id": string|null,         // CIF/NIF/NIE/VAT/RFC/RUT/CUIT
+  "address": string|null,
+  "email": string|null,
+  "raw_text": string|null        // pega aquí el texto relevante (CIF/NIF/VAT, Nº factura, etc.)
+}`
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`
+  const body = { contents: [ { parts: [ { text: prompt }, { inline_data: { mime_type: mime, data: base64 } } ] } ], generationConfig: { temperature: 0 } }
+  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  if (!res.ok) throw new Error(`GEMINI_${res.status}`)
+  const j = await res.json()
+  const txt: string = j?.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('') || ''
+  const match = txt.match(/```json[\s\S]*?```/i) || txt.match(/\{[\s\S]*\}$/)
+  const jsonStr = match ? match[0].replace(/```json|```/g, '').trim() : txt
+  let parsed: any = null
+  try { parsed = JSON.parse(jsonStr) } catch { parsed = { raw_text: txt } }
+  const rawText = typeof parsed?.raw_text === 'string' ? parsed.raw_text : txt
+  return { structured: parsed, rawText }
 }
 
-// ——— Handler ———
+// === server ===
 serve(async (req) => {
-  const origin = req.headers.get("origin") || undefined;
-  if (req.method === "OPTIONS") return new Response("ok", { headers: cors(origin) });
-
   try {
-    const apiKey = Deno.env.get("GEMINI_API_KEY");
-    const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const auth = req.headers.get('authorization') || ''
+    if (!auth.startsWith('Bearer ')) return json({ success: false, error: 'Unauthorized' }, { status: 401 })
 
-    if (!apiKey)
-      return new Response(JSON.stringify({ error: "MISSING_GEMINI_KEY" }), {
-        status: 500,
-        headers: { "Content-Type": "application/json", ...cors(origin) },
-      });
-    if (!supabaseUrl || !serviceRole)
-      return new Response(JSON.stringify({ error: "MISSING_SUPABASE_ENV" }), {
-        status: 500,
-        headers: { "Content-Type": "application/json", ...cors(origin) },
-      });
+    const ct = req.headers.get('content-type') || ''
+    let file: File | null = null
+    let userId = ''
+    let fileUrl = ''
+    let mime_type = ''
 
-    const supabase = createClient(supabaseUrl, serviceRole);
-
-    const { bytes, mime } = await readFileFromRequest(req, supabase);
-
-    // Si llegamos aquí, la descarga ya funcionó → ahora sí llama a Gemini
-    const ai = await callGemini(apiKey, bytes, mime);
-
-    const out: any = {};
-    out.type = detectDocType(ai);
-    out.vendor = (ai.vendor || "").toString().trim();
-    out.expense_date = toISODate(ai.expense_date) || undefined;
-    out.currency = normalizeCurrency(ai.currency);
-
-    const g = parseNumber(ai.amount_gross);
-    const n = parseNumber(ai.amount_net);
-    const v = parseNumber(ai.tax_vat);
-
-    if (out.type === "FACTURA") {
-      out.amount_net =
-        typeof n === "number"
-          ? n
-          : typeof g === "number" && typeof v === "number"
-          ? g - v
-          : undefined;
-      out.tax_vat = typeof v === "number" ? v : undefined;
-      out.amount_gross =
-        typeof g === "number"
-          ? g
-          : typeof n === "number" && typeof v === "number"
-          ? n + v
-          : undefined;
-      out.invoice_number = (ai.invoice_number || "").toString().trim() || undefined;
-      out.tax_id = (ai.tax_id || "").toString().trim() || undefined;
-      out.address = (ai.address || "").toString().trim() || undefined;
-      out.email = (ai.email || "").toString().trim() || undefined;
+    if (ct.includes('multipart/form-data')) {
+      const form = await req.formData()
+      file = form.get('file') as File | null
+      userId = String(form.get('userId') || '')
+      fileUrl = String(form.get('file_url') || '')
+      mime_type = String(form.get('mime_type') || (file?.type ?? ''))
     } else {
-      out.amount_gross = typeof g === "number" ? g : undefined;
-      out.amount_net = typeof n === "number" ? n : undefined;
-      out.tax_vat = typeof v === "number" ? v : undefined;
+      const body = await req.json().catch(() => ({}))
+      userId = String(body.userId || body.user_id || '')
+      fileUrl = String(body.file_url || body.url || body.filePath || '')
+      mime_type = String(body.mime_type || body.file_type || '')
     }
 
-    const cat =
-      (ai.category_suggestion ||
-        ai.category_guess ||
-        (ai as any).category ||
-        ""
-      ).toString().trim();
-    out.category_guess = cat;
-    out.category_suggestion = cat;
-    out.project_code_guess =
-      (ai.project_code_guess || (ai as any).project_code || "")
-        .toString()
-        .trim() || undefined;
-    out.notes = (ai.notes || "").toString();
+    if ((!file && !fileUrl) || !userId) {
+      return json({ success: false, error: 'File and userId are required' }, { status: 400 })
+    }
 
-    return new Response(JSON.stringify(out), {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...cors(origin) },
-    });
-  } catch (e: any) {
-    const code = e?.code || "UNEXPECTED";
-    const status = e?.status || 500;
-    const detail = e?.detail || e?.message || String(e);
-    return new Response(JSON.stringify({ error: code, detail }), {
-      status,
-      headers: { "Content-Type": "application/json", ...cors(origin) },
-    });
+    const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')
+    if (!GEMINI_API_KEY) return json({ success: false, error: 'GEMINI_API_KEY not configured' }, { status: 500 })
+
+    let base64 = ''
+    let mime = mime_type || 'application/octet-stream'
+    if (file) { const r = await fileToBase64(file); base64 = r.base64; mime = r.mime || mime }
+    else { const r = await urlToBase64(fileUrl); base64 = r.base64; mime = r.mime || mime }
+
+    const { structured, rawText } = await callGemini({ base64, mime, apiKey: GEMINI_API_KEY })
+    const data = normalizeAI(structured, rawText)
+
+    return json({ success: true, data })
+  } catch (err: any) {
+    return json({ success: false, error: String(err?.message || err) }, { status: 500 })
   }
-});
+})
