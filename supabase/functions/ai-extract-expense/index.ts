@@ -1,102 +1,296 @@
 // Ruta: supabase/functions/ai-extract-expense/index.ts
-// Descripción: Edge Function (Gemini) con detección reforzada
-//  - Acepta FormData (file + userId) o JSON (file_url)
-//  - Pide JSON y también usa texto bruto (raw_text)
-//  - Detecta tax_id con y sin separadores; detecta invoice_number desde texto
-//  - Regla: FACTURA si tax_id || invoice_number; si no, TICKET
-//  - Devuelve { success: true, data }
+// Descripción: Edge Function con flujo de **doble pasada** a Gemini.
+//  1) Clasifica (Ticket|Factura)  2) Extrae campos guiado por el tipo.
+//  Temperatura 0, JSON estricto, retries y normalización con fallbacks conservadores.
+//  Respuesta: { success: true, data: {...}, meta: { reason, confidence, timings } }
+// Anotaciones: este archivo incluye comentarios breves (NOTE / RATIONALE / TODO).
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
+// ==========================
+// Utilidades básicas de HTTP
+// ==========================
 const json = (body: unknown, init: ResponseInit = {}) =>
   new Response(JSON.stringify(body), {
     headers: { "Content-Type": "application/json", ...(init.headers || {}) },
     status: init.status ?? 200,
   })
 
-async function fileToBase64(file: File): Promise<{ base64: string; mime: string }> {
-  const buf = await file.arrayBuffer()
-  const bytes = new Uint8Array(buf)
-  let bin = ''
-  for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i])
-  return { base64: btoa(bin), mime: file.type || 'application/octet-stream' }
+// ======================
+// Tipos de la respuesta
+// ======================
+type DocType = 'FACTURA' | 'TICKET'
+
+type ClassifyResult = {
+  type: DocType
+  reason?: string
+  confidence?: number // 0..1
 }
 
-async function urlToBase64(url: string): Promise<{ base64: string; mime: string }> {
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`FETCH_FILE_URL_FAILED:${res.status}`)
-  const mime = res.headers.get('content-type') || 'application/octet-stream'
-  const buf = await res.arrayBuffer()
-  const bytes = new Uint8Array(buf)
-  let bin = ''
-  for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i])
-  return { base64: btoa(bin), mime }
+type ExtractResult = {
+  vendor?: string | null
+  expense_date?: string | null // YYYY-MM-DD
+  amount_gross?: number | null
+  tax_vat?: number | null
+  amount_net?: number | null
+  currency?: string | null
+  category_guess?: string | null
+  invoice_number?: string | null
+  tax_id?: string | null
+  address?: string | null
+  email?: string | null
+  notes?: string | null
+  raw_text?: string | null
 }
 
-function normalizeNumber(val: unknown): number | undefined {
-  if (val === undefined || val === null || val === '') return undefined
-  if (typeof val === 'number' && Number.isFinite(val)) return val
-  let s = String(val).trim().replace(/[^0-9,.-]/g, '')
-  if (!s) return undefined
-  const lastComma = s.lastIndexOf(',')
-  const lastDot = s.lastIndexOf('.')
-  if (lastComma > -1 && lastDot > -1) s = lastComma > lastDot ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '')
-  else if (lastComma > -1) s = s.replace(/\./g, '').replace(',', '.')
-  else s = s.replace(/,/g, '')
-  const n = Number(s)
-  return Number.isFinite(n) ? n : undefined
+// ================
+// Gemini helpers
+// ================
+const GEMINI_MODEL = Deno.env.get('GEMINI_MODEL') || 'gemini-1.5-flash-latest'
+
+async function callGeminiJSON({
+  apiKey,
+  model,
+  prompt,
+  base64,
+  mime,
+  responseMime = 'application/json',
+  retries = 2,
+}: {
+  apiKey: string
+  model: string
+  prompt: string
+  base64: string
+  mime: string
+  responseMime?: string
+  retries?: number
+}): Promise<any> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
+  const body = {
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { text: prompt },
+          { inlineData: { data: base64, mimeType: mime } },
+        ],
+      },
+    ],
+    generationConfig: {
+      temperature: 0,
+      topP: 1,
+      topK: 1,
+      maxOutputTokens: 2048,
+      response_mime_type: responseMime,
+    },
+  }
+
+  let lastErr: unknown
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`)
+      const json = await res.json()
+      const text = json?.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+      if (!text) throw new Error('Gemini sin contenido')
+      // NOTE: robustez ante texto accesorio
+      const parsed = safeJsonParseFromText(text)
+      if (!parsed) throw new Error('Gemini devolvió texto no-JSON')
+      return parsed
+    } catch (err) {
+      lastErr = err
+      await sleep(200 * (i + 1))
+    }
+  }
+  throw lastErr ?? new Error('Gemini fallo desconocido')
 }
 
-function toISO(val: unknown): string {
-  if (!val) return ''
-  const s = String(val)
-  let m = s.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/)
-  if (m) { const [, y, mo, d] = m; return `${y}-${String(+mo).padStart(2,'0')}-${String(+d).padStart(2,'0')}` }
-  m = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/)
-  if (m) { const [, d, mo, y] = m; return `${y}-${String(+mo).padStart(2,'0')}-${String(+d).padStart(2,'0')}` }
-  const t = Date.parse(s)
-  if (!Number.isNaN(t)) { const dt = new Date(t); return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}` }
-  return ''
+// ==========================
+// Prompts de doble pasada
+// ==========================
+function buildClassifyPrompt(fileName: string) {
+  return `Eres un clasificador de documentos de gasto. Devuelve SOLO JSON válido.\nReglas de clasificación:\n- Si ves "Factura simplificada" / "Simplified invoice" => TICKET.\n- Si aparece la palabra "Factura" o "Invoice" o hay un número de factura visible => FACTURA.\n- La presencia de CIF/NIF/VAT **no** basta por sí sola para FACTURA (los tickets pueden llevarlo).\n- En duda, elige TICKET.\nFormato EXACTO:\n{"type":"FACTURA|TICKET","reason":"...","confidence":0..1}\n\nContexto:\n- Nombre de archivo: ${fileName}\n- Si encuentras texto irrelevante, ignóralo.`
 }
 
-function pick(obj: any, ...keys: string[]) {
-  for (const k of keys) {
-    const parts = k.split('.')
-    let cur = obj
-    for (const p of parts) cur = cur?.[p]
-    if (cur !== undefined && cur !== null && cur !== '') return cur
+function buildExtractPrompt(kind: DocType) {
+  const pressure =
+    kind === 'FACTURA'
+      ? `Prioriza extraer "invoice_number" si existe (no inventes).`
+      : `No inventes "invoice_number"; déjalo null salvo que se vea claramente.`
+
+  return `Eres un extractor de datos de ${kind.toLowerCase()}s. Devuelve SOLO JSON válido con estas claves (usa null si no aplica):\n{\n  "vendor": string|null,\n  "expense_date": string|null, // YYYY-MM-DD\n  "amount_gross": number|null,\n  "tax_vat": number|null,\n  "amount_net": number|null,\n  "currency": string|null,\n  "category_guess": string|null,\n  "invoice_number": string|null,\n  "tax_id": string|null,\n  "address": string|null,\n  "email": string|null,\n  "notes": string|null,\n  "raw_text": string|null\n}\n\nPolíticas:\n- ${pressure}\n- No alucines: si dudas, usa null.\n- "expense_date" en formato YYYY-MM-DD si puedes inferirla; si no, null.\n- Los importes son números con "." decimal.\n- "raw_text": pega solo líneas clave (CIF/NIF/VAT, Nº factura, totales, fecha), no todo el OCR.`
+}
+
+// ==========================
+// Lógica principal
+// ==========================
+serve(async (req: Request) => {
+  try {
+    if (req.method === 'OPTIONS') return new Response(null, { status: 204 })
+
+    const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY') || ''
+    if (!GEMINI_API_KEY) return json({ success: false, error: 'Falta GEMINI_API_KEY' }, { status: 500 })
+
+    const contentType = req.headers.get('content-type') || ''
+
+    let file: File | undefined
+    let fileUrl = ''
+    let mime_type = ''
+
+    if (contentType.includes('multipart/form-data')) {
+      const formData = await req.formData()
+      file = formData.get('file') as File
+      fileUrl = String(formData.get('file_url') || '')
+      mime_type = String(formData.get('mime_type') || '')
+    } else {
+      const body = await req.json().catch(() => ({} as any))
+      fileUrl = String(body?.file_url || '')
+      mime_type = String(body?.mime_type || '')
+    }
+
+    if (!file && !fileUrl) return json({ success: false, error: 'No se recibió archivo ni URL' }, { status: 400 })
+
+    const fileName = (file?.name || fileUrl.split('?')[0].split('/').pop() || 'document')
+
+    let base64 = ''
+    let mime = mime_type || 'application/octet-stream'
+
+    if (file) {
+      const r = await fileToBase64(file)
+      base64 = r.base64
+      mime = r.mime || mime
+    } else {
+      const r = await urlToBase64(fileUrl)
+      base64 = r.base64
+      mime = r.mime || mime
+    }
+
+    const t0 = Date.now()
+
+    // 1) Clasificar
+    const classify = await callGeminiJSON({
+      apiKey: GEMINI_API_KEY,
+      model: GEMINI_MODEL,
+      prompt: buildClassifyPrompt(fileName),
+      base64,
+      mime,
+    }) as ClassifyResult
+
+    const detectedType: DocType = (classify?.type === 'FACTURA' ? 'FACTURA' : classify?.type === 'TICKET' ? 'TICKET' : undefined) ??
+      heuristicKindFromFilename(fileName)
+
+    // 2) Extraer
+    const extract = await callGeminiJSON({
+      apiKey: GEMINI_API_KEY,
+      model: GEMINI_MODEL,
+      prompt: buildExtractPrompt(detectedType),
+      base64,
+      mime,
+    }) as ExtractResult
+
+    const t1 = Date.now()
+
+    // 3) Normalizar + fallbacks conservadores
+    const normalized = normalizeAI(extract)
+
+    // Fallbacks con filename si falta invoice_number
+    if (!normalized.invoice_number) {
+      const fromName = detectInvoiceNumber(fileName)
+      if (detectedType === 'FACTURA' && fromName) normalized.invoice_number = fromName
+    }
+
+    // Tax ID con tolerancia a separadores, sin patrón genérico
+    if (!normalized.tax_id) {
+      const compactText = [extract.raw_text || '', extract.notes || ''].join('\n')
+      const tx = detectTaxId(compactText)
+      if (tx) normalized.tax_id = tx
+    }
+
+    // El tipo viene de la 1ª pasada (clasificación). Nunca lo forzamos por tax_id.
+    normalized.type = detectedType
+    ;(normalized as any).kind = detectedType
+
+    const meta = {
+      reason: classify?.reason || undefined,
+      confidence: typeof classify?.confidence === 'number' ? classify.confidence : undefined,
+      timings: { total_ms: t1 - t0 },
+    }
+
+    // NOTE: log corto para trazabilidad (puedes comentar en prod)
+    console.log('[ai-extract-expense]', { type: normalized.type, reason: meta.reason, invoice_number: normalized.invoice_number })
+
+    return json({ success: true, data: normalized, meta })
+  } catch (err: any) {
+    return json({ success: false, error: String(err?.message || err) }, { status: 500 })
+  }
+})
+
+// ==========================
+// Normalización & heurísticas
+// ==========================
+function normalizeAI(src: ExtractResult) {
+  const vendor = (src.vendor ?? '').toString().trim()
+  const expense_date = toISO(src.expense_date || '')
+  const amount_gross = normalizeNumber(src.amount_gross)
+  const tax_vat = normalizeNumber(src.tax_vat)
+  const amount_net = normalizeNumber(src.amount_net ?? (amount_gross && tax_vat ? amount_gross - tax_vat : undefined))
+  const currency = (src.currency || 'EUR').toString().trim().slice(0, 5)
+  const notes = (src.notes || '').toString()
+  const category_guess = (src.category_guess || '').toString() || undefined
+  const address = optionalStr(src.address)
+  const email = optionalStr(src.email)
+
+  let invoice_number = sanitizeId(optionalStr(src.invoice_number))
+  let tax_id = sanitizeId(optionalStr(src.tax_id))
+
+  return {
+    vendor,
+    expense_date,
+    amount_gross: amount_gross ?? 0,
+    tax_vat: tax_vat ?? 0,
+    amount_net: amount_net ?? 0,
+    currency,
+    category_guess,
+    category_suggestion: category_guess,
+    notes,
+    type: 'TICKET' as DocType, // NOTE: se ajusta más arriba con la clasificación
+    invoice_number: invoice_number || undefined,
+    tax_id: tax_id || undefined,
+    address,
+    email,
+  }
+}
+
+function optionalStr(v?: string | null) { return v == null ? undefined : String(v) }
+
+function sanitizeId(v?: string) {
+  if (!v) return v
+  return v.trim().replace(/[\s\t]+/g, '')
+}
+
+function normalizeNumber(n: unknown): number | undefined {
+  if (typeof n === 'number' && isFinite(n)) return n
+  if (typeof n === 'string') {
+    const s = n.replace(/\s/g, '').replace(/,/g, '.')
+    const f = parseFloat(s)
+    if (!isNaN(f)) return f
   }
   return undefined
 }
 
-// === Detección fiscal ===
-function detectTaxId(text?: string): string | undefined {
-  if (!text) return undefined
-  // 1) Patrones que permiten espacios/guiones/puntos
-  const rawPatterns: RegExp[] = [
-    /\b([ABCDEFGHJKLMNPQRSUVW]\s?[.\-\s]?\d{7}\s?[.\-\s]?[A-Z0-9])\b/i, // CIF
-    /\b(\d{8}\s?[.\-\s]?[A-Z])\b/i,                                      // NIF
-    /\b([XYZ]\s?[.\-\s]?\d{7}\s?[.\-\s]?[A-Z])\b/i,                     // NIE
-    /\b([A-Z]{2}\s?[.\-\s]?[A-Z0-9]{8,12})\b/i,                            // VAT UE (ESB..., ES B ...)
-    /\b([A-Z&Ñ]{3,4}\s?[.\-\s]?[0-9]{6}\s?[.\-\s]?[A-Z0-9]{3})\b/i,     // RFC MX
-    /\b(\d{1,3}\.\d{3}\.\d{3}-[\dkK])\b/,                               // RUT CL
-    /\b(\d{2}-?\d{8}-?\d)\b/,                                             // CUIT AR
-  ]
-  for (const re of rawPatterns) { const m = text.match(re); if (m) return m[1].replace(/[\s.\-]/g, '') }
-
-  // 2) Versión sin separadores
-  const sanitized = text.replace(/[\s.\-]/g, '')
-  const cleanPatterns: RegExp[] = [
-    /\b([ABCDEFGHJKLMNPQRSUVW]\d{7}[A-Z0-9])\b/i,
-    /\b(\d{8}[A-Z])\b/i,
-    /\b([XYZ]\d{7}[A-Z])\b/i,
-    /\b([A-Z]{2}[A-Z0-9]{8,12})\b/i,
-    /\b([A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3})\b/i,
-    /\b(\d{2}\d{8}\d)\b/,
-    /\b([A-Z0-9]{8,15})\b/i,
-  ]
-  for (const re of cleanPatterns) { const m = sanitized.match(re); if (m) return m[1] }
-  return undefined
+function toISO(s: string): string {
+  if (!s) return ''
+  // Acepta dd/mm/yyyy ó yyyy-mm-dd
+  const a = s.trim()
+  const m1 = a.match(/^(\d{4})[-/](\d{2})[-/](\d{2})$/)
+  if (m1) return `${m1[1]}-${m1[2]}-${m1[3]}`
+  const m2 = a.match(/^(\d{2})[-/](\d{2})[-/](\d{4})$/)
+  if (m2) return `${m2[3]}-${m2[2]}-${m2[1]}`
+  return ''
 }
 
 function detectInvoiceNumber(text?: string): string | undefined {
@@ -105,128 +299,80 @@ function detectInvoiceNumber(text?: string): string | undefined {
     /factur[a|o]\s*(?:n[ºo°]\s*|n\.?\s*|num(?:ero)?\s*|#|:)?\s*([A-Z0-9][A-Z0-9_.\-\/]{2,24})/i,
     /invoice\s*(?:no\.?|number|n[ºo°]|#|:)?\s*([A-Z0-9][A-Z0-9_.\-\/]{2,24})/i,
     /\b(?:n[ºo°]|no\.|n\.)\s*(?:de\s*factura)?\s*[:#-]?\s*([A-Z0-9][A-Z0-9_.\-\/]{3,24})/i,
+    // Del filename, ej: F253282.pdf o FAC-2024-0001.jpg
+    /\b([A-Z]{1,4}-?\d{3,10})\b/i,
   ]
   for (const re of patterns) { const m = text.match(re); if (m) return m[1] }
   return undefined
 }
 
-// === Normalización ===
-function normalizeAI(raw: any, rawText?: string) {
-  const src = raw?.data ?? raw
-  const vendor = pick(src, 'vendor', 'merchant', 'commerce', 'company', 'company_name') ?? ''
-  const expense_date = toISO(pick(src, 'expense_date', 'date', 'purchase_date', 'invoice_date') ?? '')
-  const amount_gross = normalizeNumber(pick(src, 'amount_gross', 'total', 'total_amount', 'amount')) ?? 0
-  const tax_vat = normalizeNumber(pick(src, 'tax_vat', 'vat', 'tax', 'iva')) ?? 0
-  const amount_net = normalizeNumber(pick(src, 'amount_net', 'net')) ?? (amount_gross && tax_vat ? amount_gross - tax_vat : 0)
-  const currency = (pick(src, 'currency', 'currency_code') ?? 'EUR') as string
-  const notes = (pick(src, 'notes', 'comment', 'description') ?? '') as string
-  const category_guess = (pick(src, 'category_guess', 'category_suggestion', 'category') ?? '') as string
+function detectTaxId(text?: string): string | undefined {
+  if (!text) return undefined
+  // Permite separadores; sin fallback genérico para evitar falsos positivos
+  const rawPatterns: RegExp[] = [
+    /\b([ABCDEFGHJKLMNPQRSUVW]\s?[.\-\s]?\d{7}\s?[.\-\s]?[A-Z0-9])\b/i, // CIF ES
+    /\b(\d{8}\s?[.\-\s]?[A-Z])\b/i,                                      // NIF ES
+    /\b([XYZ]\s?[.\-\s]?\d{7}\s?[.\-\s]?[A-Z])\b/i,                     // NIE ES
+    /\b([A-Z]{2}\s?[.\-\s]?[A-Z0-9]{8,12})\b/i,                            // VAT UE
+    /\b([A-Z&Ñ]{3,4}\s?[.\-\s]?[0-9]{6}\s?[.\-\s]?[A-Z0-9]{3})\b/i,     // RFC MX
+    /\b(\d{1,3}\.\d{3}\.\d{3}-[\dkK])\b/,                               // RUT CL
+    /\b(\d{2}-?\d{8}-?\d)\b/,                                             // CUIT AR
+  ]
+  for (const re of rawPatterns) { const m = text.match(re); if (m) return m[1].replace(/[\s.\-]/g, '') }
 
-  let invoice_number = pick(src, 'invoice_number', 'invoiceNo', 'invoice_no', 'n_factura')
-  let tax_id = pick(src, 'tax_id', 'cif', 'nif', 'vat_id', 'company_tax_id', 'fiscal_id', 'rfc', 'rut', 'cuit')
-
-  const possibleText = [pick(src, 'raw_text', 'full_text', 'text'), notes, rawText].filter(Boolean).join('\n')
-  if (!invoice_number) invoice_number = detectInvoiceNumber(possibleText)
-  if (!tax_id) tax_id = detectTaxId(possibleText)
-
-  const address = pick(src, 'address', 'company_address')
-  const email = pick(src, 'email', 'company_email')
-
-  const type = (invoice_number || tax_id) ? 'FACTURA' : 'TICKET'
-
-  return {
-    vendor: String(vendor || ''),
-    expense_date,
-    amount_gross: Number(amount_gross || 0),
-    tax_vat: Number(tax_vat || 0),
-    amount_net: Number(amount_net || 0),
-    currency: String(currency || 'EUR'),
-    category_guess: category_guess || undefined,
-    category_suggestion: category_guess || undefined,
-    notes: String(notes || ''),
-    type, kind: type,
-    invoice_number: invoice_number ? String(invoice_number) : undefined,
-    tax_id: tax_id ? String(tax_id) : undefined,
-    address: address ? String(address) : undefined,
-    email: email ? String(email) : undefined,
-  }
+  const sanitized = text.replace(/[\s.\-]/g, '')
+  const cleanPatterns: RegExp[] = [
+    /\b([ABCDEFGHJKLMNPQRSUVW]\d{7}[A-Z0-9])\b/i,
+    /\b(\d{8}[A-Z])\b/i,
+    /\b([XYZ]\d{7}[A-Z])\b/i,
+    /\b([A-Z]{2}[A-Z0-9]{8,12})\b/i,
+    /\b([A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3})\b/i,
+    /\b(\d{2}\d{8}\d)\b/,
+  ]
+  for (const re of cleanPatterns) { const m = sanitized.match(re); if (m) return m[1] }
+  return undefined
 }
 
-// === Gemini ===
-async function callGemini(args: { base64: string; mime: string; apiKey: string }) {
-  const { base64, mime, apiKey } = args
-  const prompt = `Eres un extractor de datos de tickets/facturas.
-Devuelve SOLO un objeto JSON con EXACTAMENTE estas claves (si no sabes alguna, usa null):
-{
-  "vendor": string|null,
-  "expense_date": string|null, // YYYY-MM-DD si puedes
-  "amount_gross": number|null,
-  "tax_vat": number|null,
-  "amount_net": number|null,
-  "currency": string|null,
-  "category_guess": string|null,
-  "invoice_number": string|null, // ej. F253282, 2024/001, FAC-2024-0001
-  "tax_id": string|null,         // CIF/NIF/NIE/VAT/RFC/RUT/CUIT
-  "address": string|null,
-  "email": string|null,
-  "raw_text": string|null        // pega aquí el texto relevante (CIF/NIF/VAT, Nº factura, etc.)
-}`
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`
-  const body = { contents: [ { parts: [ { text: prompt }, { inline_data: { mime_type: mime, data: base64 } } ] } ], generationConfig: { temperature: 0 } }
-  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-  if (!res.ok) throw new Error(`GEMINI_${res.status}`)
-  const j = await res.json()
-  const txt: string = j?.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('') || ''
-  const match = txt.match(/```json[\s\S]*?```/i) || txt.match(/\{[\s\S]*\}$/)
-  const jsonStr = match ? match[0].replace(/```json|```/g, '').trim() : txt
-  let parsed: any = null
-  try { parsed = JSON.parse(jsonStr) } catch { parsed = { raw_text: txt } }
-  const rawText = typeof parsed?.raw_text === 'string' ? parsed.raw_text : txt
-  return { structured: parsed, rawText }
+function heuristicKindFromFilename(name: string): DocType {
+  const lower = name.toLowerCase()
+  if (/factura\s+simplificada|simplified\s+invoice/.test(lower)) return 'TICKET'
+  if (/invoice|factura|fac-\d|f\d{3,}/.test(lower)) return 'FACTURA'
+  return 'TICKET'
 }
 
-// === server ===
-serve(async (req) => {
-  try {
-    const auth = req.headers.get('authorization') || ''
-    if (!auth.startsWith('Bearer ')) return json({ success: false, error: 'Unauthorized' }, { status: 401 })
+// ==========================
+// IO helpers
+// ==========================
+async function fileToBase64(file: File): Promise<{ base64: string; mime: string }> {
+  const buf = new Uint8Array(await file.arrayBuffer())
+  return { base64: encodeBase64(buf), mime: file.type || 'application/octet-stream' }
+}
 
-    const ct = req.headers.get('content-type') || ''
-    let file: File | null = null
-    let userId = ''
-    let fileUrl = ''
-    let mime_type = ''
+async function urlToBase64(url: string): Promise<{ base64: string; mime: string }> {
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`No pude descargar ${url}`)
+  const mime = res.headers.get('content-type') || 'application/octet-stream'
+  const buf = new Uint8Array(await res.arrayBuffer())
+  return { base64: encodeBase64(buf), mime }
+}
 
-    if (ct.includes('multipart/form-data')) {
-      const form = await req.formData()
-      file = form.get('file') as File | null
-      userId = String(form.get('userId') || '')
-      fileUrl = String(form.get('file_url') || '')
-      mime_type = String(form.get('mime_type') || (file?.type ?? ''))
-    } else {
-      const body = await req.json().catch(() => ({}))
-      userId = String(body.userId || body.user_id || '')
-      fileUrl = String(body.file_url || body.url || body.filePath || '')
-      mime_type = String(body.mime_type || body.file_type || '')
-    }
-
-    if ((!file && !fileUrl) || !userId) {
-      return json({ success: false, error: 'File and userId are required' }, { status: 400 })
-    }
-
-    const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')
-    if (!GEMINI_API_KEY) return json({ success: false, error: 'GEMINI_API_KEY not configured' }, { status: 500 })
-
-    let base64 = ''
-    let mime = mime_type || 'application/octet-stream'
-    if (file) { const r = await fileToBase64(file); base64 = r.base64; mime = r.mime || mime }
-    else { const r = await urlToBase64(fileUrl); base64 = r.base64; mime = r.mime || mime }
-
-    const { structured, rawText } = await callGemini({ base64, mime, apiKey: GEMINI_API_KEY })
-    const data = normalizeAI(structured, rawText)
-
-    return json({ success: true, data })
-  } catch (err: any) {
-    return json({ success: false, error: String(err?.message || err) }, { status: 500 })
+function encodeBase64(bytes: Uint8Array): string {
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize)
+    binary += String.fromCharCode.apply(null, Array.from(chunk) as unknown as number[])
   }
-})
+  return btoa(binary)
+}
+
+function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)) }
+
+function safeJsonParseFromText(text: string) {
+  // Intenta extraer el primer bloque JSON válido
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+  if (start === -1 || end === -1 || end <= start) return null
+  const candidate = text.slice(start, end + 1)
+  try { return JSON.parse(candidate) } catch { return null }
+}
