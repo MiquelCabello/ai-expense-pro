@@ -149,6 +149,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const metadata = currentUser.user_metadata as Record<string, unknown> | undefined;
       const hasAccountId = Object.prototype.hasOwnProperty.call(rawProfile, 'account_id');
       const rawPlan = typeof metadata?.plan === 'string' ? metadata.plan.toUpperCase() : undefined;
+      const metadataAccountId = typeof metadata?.account_id === 'string' && metadata.account_id.length > 0
+        ? metadata.account_id
+        : null;
+      const metadataOwnerId = typeof metadata?.account_owner_id === 'string' && metadata.account_owner_id.length > 0
+        ? metadata.account_owner_id
+        : null;
       const allowedPlans: Array<'FREE' | 'PROFESSIONAL' | 'ENTERPRISE'> = ['FREE', 'PROFESSIONAL', 'ENTERPRISE'];
       const fallbackPlan: 'FREE' | 'PROFESSIONAL' | 'ENTERPRISE' = allowedPlans.includes(rawPlan as any)
         ? (rawPlan as 'FREE' | 'PROFESSIONAL' | 'ENTERPRISE')
@@ -165,31 +171,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         ...(hasAccountId && rawProfile.account_id ? { account_id: rawProfile.account_id as string } : {}),
       };
 
-      let resolvedAccount: Account | null = rawProfile.account
-        ? applyPlanDefaults({
-            id: rawProfile.account.id,
-            name: rawProfile.account.name,
-            plan: rawProfile.account.plan,
-            owner_user_id: rawProfile.account.owner_user_id,
-            max_employees: rawProfile.account.max_employees,
-            can_assign_roles: rawProfile.account.can_assign_roles,
-            can_assign_department: rawProfile.account.can_assign_department,
-            can_assign_region: rawProfile.account.can_assign_region,
-            can_add_custom_categories: rawProfile.account.can_add_custom_categories,
-            monthly_expense_limit: rawProfile.account.monthly_expense_limit ?? null,
-          })
-        : null;
+      let resolvedAccount: Account | null = null;
+      let resolvedAccountSource: 'persisted' | 'fallback' | null = null;
+
+      if (rawProfile.account) {
+        resolvedAccount = applyPlanDefaults({
+          id: rawProfile.account.id,
+          name: rawProfile.account.name,
+          plan: rawProfile.account.plan,
+          owner_user_id: rawProfile.account.owner_user_id,
+          max_employees: rawProfile.account.max_employees,
+          can_assign_roles: rawProfile.account.can_assign_roles,
+          can_assign_department: rawProfile.account.can_assign_department,
+          can_assign_region: rawProfile.account.can_assign_region,
+          can_add_custom_categories: rawProfile.account.can_add_custom_categories,
+          monthly_expense_limit: rawProfile.account.monthly_expense_limit ?? null,
+        });
+        resolvedAccountSource = 'persisted';
+      }
 
       if (!resolvedAccount) {
         const fallbackAccountId = (hasAccountId && rawProfile.account_id)
           ? (rawProfile.account_id as string)
-          : (typeof metadata?.account_id === 'string' && metadata.account_id.length > 0
-            ? metadata.account_id
-            : rawProfile.user_id ?? currentUser.id);
+          : (metadataAccountId ?? rawProfile.user_id ?? currentUser.id);
 
-        const fallbackOwnerId = typeof metadata?.account_owner_id === 'string' && metadata.account_owner_id.length > 0
-          ? metadata.account_owner_id
-          : rawProfile.user_id ?? currentUser.id;
+        const fallbackOwnerId = metadataOwnerId ?? null;
 
         const fallbackName = typeof metadata?.company_name === 'string' && metadata.company_name.length > 0
           ? metadata.company_name
@@ -199,7 +205,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           id: fallbackAccountId,
           name: fallbackName,
           plan: fallbackPlan,
-          owner_user_id: fallbackOwnerId,
+          owner_user_id: fallbackOwnerId ?? '',
           max_employees: null,
           can_assign_roles: fallbackPlan === 'ENTERPRISE',
           can_assign_department: fallbackPlan !== 'FREE',
@@ -207,6 +213,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           can_add_custom_categories: fallbackPlan === 'ENTERPRISE',
           monthly_expense_limit: fallbackPlan === 'FREE' ? 50 : null,
         });
+        resolvedAccountSource = 'fallback';
       }
 
       if (isOwnerEmail(currentUser.email)) {
@@ -225,7 +232,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!baseProfile.account_id) {
           baseProfile.account_id = resolvedAccount.id;
         }
-        if (resolvedAccount.owner_user_id === currentUser.id) {
+        const ownsAccount = (metadataOwnerId === currentUser.id)
+          || (resolvedAccountSource === 'persisted' && resolvedAccount.owner_user_id === currentUser.id);
+        if (ownsAccount) {
           baseProfile.role = 'ADMIN';
         }
       }
