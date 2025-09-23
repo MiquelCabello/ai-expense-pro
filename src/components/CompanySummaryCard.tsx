@@ -27,10 +27,12 @@ export default function CompanySummaryCard({ account, profile, planDisplay, acti
           </div>
           <div>
             <CardTitle className="text-2xl font-semibold">{companyName}</CardTitle>
-            <CardDescription>{planDisplay} · {maxEmployees ? `${activeEmployees}/${maxEmployees} usuarios activos` : `${activeEmployees} usuarios activos`}</CardDescription>
+            <CardDescription>
+              {maxEmployees ? `${activeEmployees}/${maxEmployees} usuarios activos` : `${activeEmployees} usuarios activos`}
+            </CardDescription>
           </div>
         </div>
-        <Badge variant="secondary">ID #{account?.id?.slice(0, 8) ?? 'N/A'}</Badge>
+        <Badge variant="secondary">{planDisplay}</Badge>
       </CardHeader>
       <CardContent className="grid gap-6 md:grid-cols-2">
         <div className="space-y-3">
