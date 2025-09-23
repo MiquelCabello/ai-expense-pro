@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,11 +8,12 @@ import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/hooks/useAuth';
+import { useTheme } from '@/components/ThemeProvider';
 import { Settings, Euro, Globe, Clock, Palette, FolderOpen, Briefcase, Plus, Edit2, Trash2 } from 'lucide-react';
 
 interface Category {
@@ -28,20 +29,28 @@ interface ProjectCode {
   status: string;
 }
 
+const PREFERENCES_STORAGE_KEY = 'expensepro-general-preferences';
+
+const isValidThemePreference = (value: unknown): value is 'light' | 'dark' | 'system' =>
+  value === 'light' || value === 'dark' || value === 'system';
+
 export default function ConfigurationPage() {
-  const { profile } = useAuth();
+  const { profile, account, isMaster } = useAuth();
+  const { theme, setTheme } = useTheme();
   const [categories, setCategories] = useState<Category[]>([]);
   const [projectCodes, setProjectCodes] = useState<ProjectCode[]>([]);
   const [loading, setLoading] = useState(true);
-  
+
   // Configuration states
-  const [darkMode, setDarkMode] = useState(false);
   const [language, setLanguage] = useState('es');
   const [timezone, setTimezone] = useState('Europe/Madrid');
   const [currency, setCurrency] = useState('EUR');
   const [defaultVat, setDefaultVat] = useState('21');
   const [autoApprovalLimit, setAutoApprovalLimit] = useState('100');
   const [sandboxMode, setSandboxMode] = useState(false);
+  const [systemPrefersDark, setSystemPrefersDark] = useState(false);
+
+  const isDarkMode = theme === 'dark' || (theme === 'system' && systemPrefersDark);
 
   // Dialog states
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
@@ -52,38 +61,156 @@ export default function ConfigurationPage() {
   const [newProjectName, setNewProjectName] = useState('');
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [isAddingProject, setIsAddingProject] = useState(false);
+  const [categoryToDelete, setCategoryToDelete] = useState<Category | null>(null);
+  const [projectToDelete, setProjectToDelete] = useState<ProjectCode | null>(null);
+  const [isDeletingCategory, setIsDeletingCategory] = useState(false);
+  const [isDeletingProject, setIsDeletingProject] = useState(false);
+
+  const planNameMap: Record<'FREE' | 'PROFESSIONAL' | 'ENTERPRISE', string> = {
+    FREE: 'Starter',
+    PROFESSIONAL: 'Professional',
+    ENTERPRISE: 'Enterprise',
+  };
+  const planConfig: Record<'FREE' | 'PROFESSIONAL' | 'ENTERPRISE', { maxEmployees: number | null; monthlyLimit: number | null; categoryLimit: number | null; projectLimit: number | null }> = {
+    FREE: { maxEmployees: 2, monthlyLimit: 50, categoryLimit: 0, projectLimit: 0 },
+    PROFESSIONAL: { maxEmployees: 25, monthlyLimit: null, categoryLimit: 5, projectLimit: 10 },
+    ENTERPRISE: { maxEmployees: null, monthlyLimit: null, categoryLimit: null, projectLimit: null },
+  };
+  const planKey = (account?.plan ?? 'FREE') as 'FREE' | 'PROFESSIONAL' | 'ENTERPRISE';
+  const planName = isMaster ? 'Master' : planNameMap[planKey];
+  const resolvedAccountId = isMaster ? null : (profile?.account_id ?? account?.id ?? null);
+  const canAddCustomCategories = planKey !== 'FREE';
+  const canManageProjects = planKey !== 'FREE';
+  const maxEmployees = isMaster ? null : account?.max_employees ?? planConfig[planKey].maxEmployees;
+  const monthlyLimit = isMaster ? null : account?.monthly_expense_limit ?? planConfig[planKey].monthlyLimit;
+  const categoryLimit = planConfig[planKey].categoryLimit;
+  const projectLimit = planConfig[planKey].projectLimit;
+  const isCategoriesEnabled = planKey !== 'FREE';
 
   useEffect(() => {
-    loadData();
+    if (typeof window === 'undefined') return;
+
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = (event: MediaQueryListEvent) => {
+      setSystemPrefersDark(event.matches);
+    };
+
+    setSystemPrefersDark(mediaQuery.matches);
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', handleChange);
+      return () => mediaQuery.removeEventListener('change', handleChange);
+    }
+
+    mediaQuery.addListener(handleChange);
+    return () => mediaQuery.removeListener(handleChange);
   }, []);
 
-  const loadData = async () => {
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
     try {
-      const [categoriesRes, projectCodesRes] = await Promise.all([
-        supabase.from('categories').select('*').order('name'),
-        supabase.from('project_codes').select('*').eq('status', 'ACTIVE').order('code')
+      const storedPreferences = localStorage.getItem(PREFERENCES_STORAGE_KEY);
+      if (!storedPreferences) return;
+
+      const parsedPreferences: {
+        language?: unknown;
+        timezone?: unknown;
+        theme?: unknown;
+      } = JSON.parse(storedPreferences);
+
+      if (typeof parsedPreferences.language === 'string') {
+        setLanguage(parsedPreferences.language);
+      }
+
+      if (typeof parsedPreferences.timezone === 'string') {
+        setTimezone(parsedPreferences.timezone);
+      }
+
+      if (isValidThemePreference(parsedPreferences.theme)) {
+        setTheme(parsedPreferences.theme);
+      }
+    } catch (error) {
+      console.error('Error loading saved preferences:', error);
+    }
+  }, [setTheme]);
+
+  const loadData = useCallback(async () => {
+    try {
+      if (!isMaster) {
+        if (!profile) {
+          setLoading(false);
+          return;
+        }
+        if (!resolvedAccountId) {
+          console.warn('[Configuration] Missing account_id for non-master user', profile?.id);
+          setCategories([]);
+          setProjectCodes([]);
+          setLoading(false);
+          return;
+        }
+      }
+
+      let categoriesQuery = supabase
+        .from('categories')
+        .select('*')
+        .order('name');
+
+      if (!isMaster && resolvedAccountId) {
+        categoriesQuery = categoriesQuery.eq('account_id', resolvedAccountId);
+      }
+
+      let projectCodesQuery = supabase
+        .from('project_codes')
+        .select('*')
+        .eq('status', 'ACTIVE')
+        .order('code');
+
+      if (!isMaster && resolvedAccountId) {
+        projectCodesQuery = projectCodesQuery.eq('account_id', resolvedAccountId);
+      }
+
+      const [{ data: categoriesData, error: categoriesError }, { data: projectCodesData, error: projectCodesError }] = await Promise.all([
+        categoriesQuery,
+        projectCodesQuery,
       ]);
 
-      if (categoriesRes.data) setCategories(categoriesRes.data);
-      if (projectCodesRes.data) setProjectCodes(projectCodesRes.data);
+      if (categoriesError) throw categoriesError;
+      if (projectCodesError) throw projectCodesError;
+
+      setCategories(categoriesData ?? []);
+      setProjectCodes(projectCodesData ?? []);
     } catch (error) {
       console.error('Error loading configuration data:', error);
       toast.error('Error al cargar los datos de configuración');
     } finally {
       setLoading(false);
     }
-  };
+  }, [resolvedAccountId, isMaster, profile]);
 
   const savePreferences = async () => {
     try {
       // Here you would typically save to a user preferences table
       // For now, just simulate saving
       await new Promise(resolve => setTimeout(resolve, 500));
+      if (typeof window !== 'undefined') {
+        const preferencesToStore = {
+          language,
+          timezone,
+          theme
+        };
+        localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(preferencesToStore));
+      }
       toast.success('Preferencias guardadas correctamente');
     } catch (error) {
+      console.error('Error saving preferences:', error);
       toast.error('Error al guardar preferencias');
     }
   };
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const saveFinancialConfig = async () => {
     try {
@@ -103,7 +230,15 @@ export default function ConfigurationPage() {
   };
 
   const handleUpdateCategory = async () => {
-    if (!editingCategory) return;
+    if (isMaster) {
+      toast.info('Gestiona las categorías específicas desde la consola administrativa global.');
+      return;
+    }
+
+    if (!editingCategory || !resolvedAccountId) {
+      toast.error('No se ha podido identificar la cuenta activa.');
+      return;
+    }
     
     try {
       const { error } = await supabase
@@ -112,7 +247,8 @@ export default function ConfigurationPage() {
           name: newCategoryName,
           budget_monthly: newCategoryBudget ? parseFloat(newCategoryBudget) : null
         })
-        .eq('id', editingCategory.id);
+        .eq('id', editingCategory.id)
+        .eq('account_id', resolvedAccountId);
 
       if (error) throw error;
 
@@ -125,6 +261,29 @@ export default function ConfigurationPage() {
   };
 
   const handleAddCategory = async () => {
+    if (isMaster) {
+      toast.info('Gestiona las categorías específicas desde la consola administrativa global.');
+      return;
+    }
+
+    if (!resolvedAccountId) {
+      toast.error('No se ha podido identificar la cuenta activa.');
+      return;
+    }
+
+    if (!isCategoriesEnabled) {
+      toast.error('La gestión de categorías está disponible a partir del plan Professional.');
+      return;
+    }
+
+    if (typeof categoryLimit === 'number' && categories.length >= categoryLimit) {
+      toast.error(`Has alcanzado el límite de ${categoryLimit} categorías en tu plan.`);
+      return;
+    }
+    if (!canAddCustomCategories) {
+      toast.error('Tu plan actual no permite añadir categorías personalizadas');
+      return;
+    }
     if (!newCategoryName.trim()) {
       toast.error('El nombre de la categoría es requerido');
       return;
@@ -135,7 +294,8 @@ export default function ConfigurationPage() {
         .from('categories')
         .insert({
           name: newCategoryName,
-          budget_monthly: newCategoryBudget ? parseFloat(newCategoryBudget) : null
+          budget_monthly: newCategoryBudget ? parseFloat(newCategoryBudget) : null,
+          account_id: resolvedAccountId
         });
 
       if (error) throw error;
@@ -157,7 +317,15 @@ export default function ConfigurationPage() {
   };
 
   const handleUpdateProject = async () => {
-    if (!editingProject) return;
+    if (isMaster) {
+      toast.info('Gestiona los proyectos desde la consola administrativa global.');
+      return;
+    }
+
+    if (!editingProject || !resolvedAccountId) {
+      toast.error('No se ha podido identificar la cuenta activa.');
+      return;
+    }
     
     try {
       const { error } = await supabase
@@ -166,7 +334,8 @@ export default function ConfigurationPage() {
           code: newProjectCode,
           name: newProjectName
         })
-        .eq('id', editingProject.id);
+        .eq('id', editingProject.id)
+        .eq('account_id', resolvedAccountId);
 
       if (error) throw error;
 
@@ -179,6 +348,25 @@ export default function ConfigurationPage() {
   };
 
   const handleAddProject = async () => {
+    if (isMaster) {
+      toast.info('Gestiona los proyectos desde la consola administrativa global.');
+      return;
+    }
+
+    if (!resolvedAccountId) {
+      toast.error('No se ha podido identificar la cuenta activa.');
+      return;
+    }
+
+    if (!canManageProjects) {
+      toast.error('La gestión de códigos de proyecto está disponible a partir del plan Professional.');
+      return;
+    }
+
+    if (typeof projectLimit === 'number' && projectCodes.length >= projectLimit) {
+      toast.error(`Has alcanzado el límite de ${projectLimit} códigos de proyecto en tu plan.`);
+      return;
+    }
     if (!newProjectCode.trim() || !newProjectName.trim()) {
       toast.error('El código y nombre del proyecto son requeridos');
       return;
@@ -190,7 +378,8 @@ export default function ConfigurationPage() {
         .insert({
           code: newProjectCode,
           name: newProjectName,
-          status: 'ACTIVE'
+          status: 'ACTIVE',
+          account_id: resolvedAccountId
         });
 
       if (error) throw error;
@@ -205,36 +394,70 @@ export default function ConfigurationPage() {
     }
   };
 
-  const handleDeleteCategory = async (categoryId: string, categoryName: string) => {
+  const handleDeleteCategory = async () => {
+    if (isMaster) {
+      toast.info('Gestiona las categorías específicas desde la consola administrativa global.');
+      return;
+    }
+
+    if (!categoryToDelete || !resolvedAccountId) {
+      toast.error('No se ha podido identificar la cuenta activa.');
+      return;
+    }
+
+    setIsDeletingCategory(true);
     try {
       const { error } = await supabase
         .from('categories')
         .delete()
-        .eq('id', categoryId);
+        .eq('id', categoryToDelete.id)
+        .eq('account_id', resolvedAccountId);
 
       if (error) throw error;
 
-      toast.success(`Categoría "${categoryName}" eliminada correctamente`);
+      toast.success(`Categoría "${categoryToDelete.name}" eliminada correctamente`);
+      setCategoryToDelete(null);
       loadData();
     } catch (error) {
       toast.error('Error al eliminar categoría');
+    } finally {
+      setIsDeletingCategory(false);
     }
   };
 
-  const handleDeleteProject = async (projectId: string, projectCode: string) => {
+  const handleDeleteProject = async () => {
+    if (isMaster) {
+      toast.info('Gestiona los proyectos desde la consola administrativa global.');
+      return;
+    }
+
+    if (!projectToDelete || !resolvedAccountId) {
+      toast.error('No se ha podido identificar la cuenta activa.');
+      return;
+    }
+
+    setIsDeletingProject(true);
     try {
       const { error } = await supabase
         .from('project_codes')
         .update({ status: 'INACTIVE' })
-        .eq('id', projectId);
+        .eq('id', projectToDelete.id)
+        .eq('account_id', resolvedAccountId);
 
       if (error) throw error;
 
-      toast.success(`Código de proyecto "${projectCode}" desactivado correctamente`);
+      toast.success(`Código de proyecto "${projectToDelete.code}" desactivado correctamente`);
+      setProjectToDelete(null);
       loadData();
     } catch (error) {
       toast.error('Error al desactivar código de proyecto');
+    } finally {
+      setIsDeletingProject(false);
     }
+  };
+
+  const handleUpgradeClick = () => {
+    toast.info('La actualización de plan estará disponible en la integración de pagos.');
   };
 
   if (loading) {
@@ -253,6 +476,39 @@ export default function ConfigurationPage() {
   return (
     <AppLayout>
       <div className="p-6 space-y-6">
+        <Card className="bg-gradient-card border-0 shadow-md">
+          <CardHeader>
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div>
+                <CardTitle className="text-xl">Plan {planName}</CardTitle>
+                <CardDescription>
+                  {typeof monthlyLimit === 'number'
+                    ? `Hasta ${monthlyLimit} gastos al mes · ${typeof maxEmployees === 'number' ? `${maxEmployees} usuarios incluidos` : 'Usuarios ilimitados'}`
+                    : 'Gastos ilimitados y usuarios flexibles'}
+                </CardDescription>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {canAddCustomCategories ? (
+                  <Badge variant="secondary">Categorías personalizadas</Badge>
+                ) : (
+                  <Badge variant="outline">Categorías limitadas</Badge>
+                )}
+                <Badge variant="outline">Plan actual</Badge>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <p className="text-sm text-muted-foreground">
+              {isMaster
+                ? 'Acceso total a todas las cuentas y configuraciones.'
+                : 'Gestiona tu suscripción y mejora de plan cuando esté disponible la pasarela de pago.'}
+            </p>
+            <Button onClick={handleUpgradeClick} variant="outline" disabled={isMaster}>
+              {isMaster ? 'Gestión centralizada' : 'Actualizar Plan'}
+            </Button>
+          </CardContent>
+        </Card>
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Preferencias Generales */}
           <Card>
@@ -270,8 +526,8 @@ export default function ConfigurationPage() {
                   <p className="text-xs text-muted-foreground">Alternar entre tema claro y oscuro</p>
                 </div>
                 <Switch
-                  checked={darkMode}
-                  onCheckedChange={setDarkMode}
+                  checked={isDarkMode}
+                  onCheckedChange={(checked) => setTheme(checked ? 'dark' : 'light')}
                 />
               </div>
 
@@ -394,8 +650,11 @@ export default function ConfigurationPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               {categories.map((category) => (
-                <div key={category.id} className="flex items-center justify-between p-3 rounded-lg border">
-                  <div className="flex items-center space-x-3">
+                <div
+                  key={category.id}
+                  className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
                     <div className="w-2 h-2 rounded-full bg-primary"></div>
                     <span className="font-medium">{category.name}</span>
                     {category.budget_monthly && (
@@ -404,7 +663,7 @@ export default function ConfigurationPage() {
                       </Badge>
                     )}
                   </div>
-                  <div className="flex space-x-2">
+                  <div className="flex flex-wrap gap-2 sm:flex-nowrap sm:justify-end">
                     <Dialog open={editingCategory?.id === category.id} onOpenChange={(open) => !open && setEditingCategory(null)}>
                       <DialogTrigger asChild>
                         <Button variant="outline" size="sm" onClick={() => handleEditCategory(category)}>
@@ -450,40 +709,54 @@ export default function ConfigurationPage() {
                         </div>
                       </DialogContent>
                     </Dialog>
-                    
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="destructive" size="sm">
-                          <Trash2 className="h-4 w-4 mr-1" />
-                          Eliminar
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            Esta acción eliminará permanentemente la categoría "{category.name}". 
-                            Esta acción no se puede deshacer.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                          <AlertDialogAction
-                            onClick={() => handleDeleteCategory(category.id, category.name)}
-                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                          >
-                            Eliminar
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
+                    <Button variant="destructive" size="sm" onClick={() => setCategoryToDelete(category)}>
+                      <Trash2 className="h-4 w-4 mr-1" />
+                      Eliminar
+                    </Button>
                   </div>
                 </div>
               ))}
+
+              <AlertDialog
+                open={!!categoryToDelete}
+                onOpenChange={(open) => {
+                  if (!open && !isDeletingCategory) {
+                    setCategoryToDelete(null);
+                  }
+                }}
+              >
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Esta acción eliminará permanentemente la categoría "{categoryToDelete?.name}".
+                      No se puede deshacer.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel disabled={isDeletingCategory}>Cancelar</AlertDialogCancel>
+                    <AlertDialogAction
+                      disabled={isDeletingCategory}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      onClick={async (event) => {
+                        event.preventDefault();
+                        await handleDeleteCategory();
+                      }}
+                    >
+                      {isDeletingCategory ? 'Eliminando...' : 'Eliminar'}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
               
               <Dialog open={isAddingCategory} onOpenChange={setIsAddingCategory}>
                 <DialogTrigger asChild>
-                  <Button variant="outline" className="w-full">
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    disabled={!canAddCustomCategories}
+                    title={!canAddCustomCategories ? 'Disponible solo en el plan Enterprise' : undefined}
+                  >
                     <Plus className="h-4 w-4 mr-2" />
                     Añadir Categoría
                   </Button>
@@ -530,6 +803,11 @@ export default function ConfigurationPage() {
                   </div>
                 </DialogContent>
               </Dialog>
+              {!canAddCustomCategories && (
+                <p className="mt-3 text-xs text-muted-foreground text-center">
+                  Añadir categorías personalizadas es exclusivo del plan Enterprise.
+                </p>
+              )}
             </CardContent>
           </Card>
 
@@ -544,12 +822,15 @@ export default function ConfigurationPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               {projectCodes.map((project) => (
-                <div key={project.id} className="flex items-center justify-between p-3 rounded-lg border">
+                <div
+                  key={project.id}
+                  className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between"
+                >
                   <div>
                     <div className="font-medium">{project.code}</div>
                     <div className="text-sm text-muted-foreground">{project.name}</div>
                   </div>
-                  <div className="flex space-x-2">
+                  <div className="flex flex-wrap gap-2 sm:flex-nowrap sm:justify-end">
                     <Dialog open={editingProject?.id === project.id} onOpenChange={(open) => !open && setEditingProject(null)}>
                       <DialogTrigger asChild>
                         <Button variant="outline" size="sm" onClick={() => handleEditProject(project)}>
@@ -594,36 +875,45 @@ export default function ConfigurationPage() {
                         </div>
                       </DialogContent>
                     </Dialog>
-                    
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="destructive" size="sm">
-                          <Trash2 className="h-4 w-4 mr-1" />
-                          Desactivar
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            Esta acción desactivará el código de proyecto "{project.code}". 
-                            No podrá ser utilizado en nuevos gastos.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                          <AlertDialogAction
-                            onClick={() => handleDeleteProject(project.id, project.code)}
-                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                          >
-                            Desactivar
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
+                    <Button variant="destructive" size="sm" onClick={() => setProjectToDelete(project)}>
+                      <Trash2 className="h-4 w-4 mr-1" />
+                      Desactivar
+                    </Button>
                   </div>
                 </div>
               ))}
+
+              <AlertDialog
+                open={!!projectToDelete}
+                onOpenChange={(open) => {
+                  if (!open && !isDeletingProject) {
+                    setProjectToDelete(null);
+                  }
+                }}
+              >
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Esta acción desactivará el código de proyecto "{projectToDelete?.code}".
+                      No podrá ser utilizado en nuevos gastos.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel disabled={isDeletingProject}>Cancelar</AlertDialogCancel>
+                    <AlertDialogAction
+                      disabled={isDeletingProject}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      onClick={async (event) => {
+                        event.preventDefault();
+                        await handleDeleteProject();
+                      }}
+                    >
+                      {isDeletingProject ? 'Desactivando...' : 'Desactivar'}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
               
               <Dialog open={isAddingProject} onOpenChange={setIsAddingProject}>
                 <DialogTrigger asChild>
