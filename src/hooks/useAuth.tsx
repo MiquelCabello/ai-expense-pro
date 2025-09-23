@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
+import type { Database } from '@/integrations/supabase/types';
 
 const OWNER_EMAIL = 'info@miquelcabello.com';
 
@@ -51,6 +52,9 @@ export interface Account {
   can_add_custom_categories: boolean;
   monthly_expense_limit: number | null;
 }
+
+type ProfileRow = Database['public']['Tables']['profiles']['Row'];
+type EnrichedProfileRow = ProfileRow & { account?: Account | null };
 
 const applyPlanDefaults = (account: Account): Account => {
   const defaults = PLAN_DEFAULTS[account.plan];
@@ -121,7 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile(null);
     };
 
-    const applyProfile = (rawProfile: any, currentUser: User) => {
+    const applyProfile = (rawProfile: EnrichedProfileRow | null, currentUser: User) => {
       if (!mounted) return;
 
       if (!rawProfile) {
@@ -257,7 +261,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (error) throw error;
 
-        let enrichedProfile = data;
+        let enrichedProfile: EnrichedProfileRow | null = data;
 
         if (enrichedProfile && !enrichedProfile.account) {
           const hasAccountId = Object.prototype.hasOwnProperty.call(enrichedProfile, 'account_id');

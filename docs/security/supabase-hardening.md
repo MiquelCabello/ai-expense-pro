@@ -20,12 +20,3 @@ This project now ships with repeatable migration and tooling to keep the Supabas
 4. After the upgrade completes, rerun `node scripts/security-status.js` to confirm the reported Postgres version matches the expected patched build.
 
 Keeping the script and functions in the repo means future checks stay automated and auditable in source control.
-
-## Inactive profile isolation
-
-* Migration `supabase/migrations/20251015103000_enforce_get_account_id_active_profiles.sql` now restricts `public.get_account_id()` to return an account only when the latest profile is `ACTIVE`. This keeps row level security policies such as those on `profiles`, `expenses`, `files`, and `accounts` from granting access to users who have been deactivated in the UI.
-* After disabling an employee from the admin panel, you can confirm the revocation from SQL by running:
-  ```sql
-  select public.get_account_id('<user-id>');
-  ```
-  The function will now yield `NULL` for inactive users, matching the behaviour enforced by the RLS policies.
