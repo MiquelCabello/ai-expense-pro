@@ -75,12 +75,14 @@ export default function Sidebar() {
         icon: Building2,
         current: location.pathname === '/empresa'
       }]),
-    {
-      name: 'Configuración',
-      href: '/configuracion',
-      icon: Settings,
-      current: location.pathname === '/configuracion'
-    }
+    ...(isAdmin
+      ? [{
+        name: 'Configuración',
+        href: '/configuracion',
+        icon: Settings,
+        current: location.pathname === '/configuracion'
+      }]
+      : [])
   ];
 
   return (

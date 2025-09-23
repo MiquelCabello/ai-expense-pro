@@ -15,6 +15,7 @@ import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/components/ThemeProvider';
 import { Settings, Euro, Globe, Clock, Palette, FolderOpen, Briefcase, Plus, Edit2, Trash2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 interface Category {
   id: string;
@@ -36,6 +37,7 @@ const isValidThemePreference = (value: unknown): value is 'light' | 'dark' | 'sy
 
 export default function ConfigurationPage() {
   const { profile, account, isMaster, user } = useAuth();
+  const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
   const [categories, setCategories] = useState<Category[]>([]);
   const [projectCodes, setProjectCodes] = useState<ProjectCode[]>([]);
@@ -88,6 +90,13 @@ export default function ConfigurationPage() {
   const isCategoriesEnabled = planKey !== 'FREE';
   const categoriesLimitReached = typeof categoryLimit === 'number' && categories.length >= categoryLimit;
   const projectLimitReached = typeof projectLimit === 'number' && projectCodes.length >= projectLimit;
+  const isAdminUser = isMaster || profile?.role === 'ADMIN';
+
+  useEffect(() => {
+    if (profile && !isAdminUser) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [profile, isAdminUser, navigate]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -140,6 +149,12 @@ export default function ConfigurationPage() {
   const loadData = useCallback(async () => {
     try {
       if (!isMaster) {
+        if (profile && profile.role !== 'ADMIN') {
+          setCategories([]);
+          setProjectCodes([]);
+          setLoading(false);
+          return;
+        }
         if (!profile) {
           setLoading(false);
           return;
@@ -474,6 +489,10 @@ export default function ConfigurationPage() {
   const handleUpgradeClick = () => {
     toast.info('La actualización de plan estará disponible en la integración de pagos.');
   };
+
+  if (profile && !isAdminUser) {
+    return null;
+  }
 
   if (loading) {
     return (
@@ -1079,3 +1098,4 @@ export default function ConfigurationPage() {
     </AppLayout>
   );
 }
+
