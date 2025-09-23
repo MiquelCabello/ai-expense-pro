@@ -9,7 +9,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import AppLayout from '@/components/AppLayout';
-import CompanySummaryCard from '@/components/CompanySummaryCard';
 import { 
   Users, 
   UserPlus, 
@@ -23,7 +22,6 @@ import {
   UserCheck,
   UserX
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
 interface Employee {
@@ -39,8 +37,7 @@ interface Employee {
 }
 
 export default function EmployeesPage() {
-  const { profile, account, isMaster } = useAuth();
-  const navigate = useNavigate();
+  const { profile, account } = useAuth();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -54,45 +51,16 @@ export default function EmployeesPage() {
   });
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 
-const planNameMap: Record<'FREE' | 'PROFESSIONAL' | 'ENTERPRISE', string> = { FREE: 'Starter', PROFESSIONAL: 'Professional', ENTERPRISE: 'Enterprise' };
-const planEmployeeLimitMap: Record<'FREE' | 'PROFESSIONAL' | 'ENTERPRISE', number | null> = {
-  FREE: 2,
-  PROFESSIONAL: 25,
-  ENTERPRISE: null,
-};
-const planKey = (account?.plan ?? 'FREE') as 'FREE' | 'PROFESSIONAL' | 'ENTERPRISE';
-const planName = planNameMap[planKey];
-const planDisplay = planName;
-const resolvedAccountId = profile?.account_id ?? account?.id ?? null;
-const maxEmployees = account?.max_employees ?? planEmployeeLimitMap[planKey];
+  const accountId = profile?.account_id ?? null;
+  const maxEmployees = account?.max_employees ?? null;
   const canAssignRoles = account?.can_assign_roles ?? false;
   const canAssignDepartment = account?.can_assign_department ?? false;
   const canAssignRegion = account?.can_assign_region ?? false;
+  const planLabel = account?.plan ?? 'FREE';
+  const planNameMap: Record<string, string> = { FREE: 'Starter', PROFESSIONAL: 'Professional', ENTERPRISE: 'Enterprise' };
+  const planName = planNameMap[planLabel] ?? planLabel;
   const activeEmployeesCount = employees.filter(employee => employee.status === 'ACTIVE').length;
   const isAtEmployeeLimit = typeof maxEmployees === 'number' && activeEmployeesCount >= maxEmployees;
-  const [accountIdOverride, setAccountIdOverride] = useState<string | null>(null);
-
-  const effectiveAccountId = resolvedAccountId ?? accountIdOverride;
-
-  useEffect(() => {
-    if (resolvedAccountId) {
-      setAccountIdOverride(null);
-      return;
-    }
-
-    if (!resolvedAccountId && profile?.user_id) {
-      void (async () => {
-        try {
-          const { data, error } = await supabase.rpc('get_account_id', { _uid: profile.user_id });
-          if (!error && data) {
-            setAccountIdOverride(data as string);
-          }
-        } catch (error) {
-          console.warn('[Employees] Unable to resolve account via RPC', error);
-        }
-      })();
-    }
-  }, [resolvedAccountId, profile?.user_id]);
 
   useEffect(() => {
     setNewEmployee(prev => ({
@@ -104,39 +72,6 @@ const maxEmployees = account?.max_employees ?? planEmployeeLimitMap[planKey];
   }, [canAssignRoles, canAssignDepartment, canAssignRegion]);
 
   const fetchEmployees = useCallback(async () => {
-    let accountIdToUse = effectiveAccountId ?? profile?.account_id ?? account?.id ?? null;
-
-    if (!isMaster) {
-      if (!profile) {
-        setLoading(false);
-        return;
-      }
-
-      if (!accountIdToUse && profile?.user_id) {
-        try {
-          const { data, error } = await supabase.rpc('get_account_id', { _uid: profile.user_id });
-          if (!error && data) {
-            accountIdToUse = data as string;
-            setAccountIdOverride(accountIdToUse);
-          }
-        } catch (error) {
-          console.warn('[Employees] RPC get_account_id failed', error);
-        }
-      }
-
-      if (!accountIdToUse) {
-        console.warn('[Employees] Missing account_id for non-master user', profile?.id);
-        if (profile.role === 'ADMIN') {
-          accountIdToUse = profile.user_id;
-          setAccountIdOverride(accountIdToUse);
-        } else {
-          setEmployees([]);
-          setLoading(false);
-          return;
-        }
-      }
-    }
-
     try {
       setLoading(true);
 
@@ -145,32 +80,44 @@ const maxEmployees = account?.max_employees ?? planEmployeeLimitMap[planKey];
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (!isMaster && accountIdToUse) {
-        query = query.eq('account_id', accountIdToUse);
+      if (accountId) {
+        query = query.eq('account_id', accountId);
       }
 
       const { data, error } = await query;
+      let resolvedEmployees = data ?? [];
+
       if (error) {
-        throw error;
+        if (accountId && typeof error.message === 'string' && error.message.includes('account_id')) {
+          const { data: fallbackData, error: fallbackError } = await supabase
+            .from('profiles')
+            .select('*')
+            .order('created_at', { ascending: false });
+          if (fallbackError) throw fallbackError;
+          resolvedEmployees = fallbackData ?? [];
+        } else {
+          throw error;
+        }
       }
 
-      setEmployees((data ?? []) as Employee[]);
+      setEmployees(resolvedEmployees);
     } catch (error) {
       console.error('[Employees] fetch failed', error);
       toast.error('Error cargando empleados');
     } finally {
       setLoading(false);
     }
-  }, [effectiveAccountId, isMaster, profile, account?.id]);
+  }, [accountId]);
 
   useEffect(() => {
-    if (isMaster || profile?.role === 'ADMIN') {
+    if (profile?.role === 'ADMIN') {
       fetchEmployees();
     }
-  }, [profile, effectiveAccountId, fetchEmployees, isMaster]);
+  }, [profile, accountId, fetchEmployees]);
+
 
   const handleCreateEmployee = async () => {
-    if (profile?.role !== 'ADMIN' && !isMaster) {
+    if (!accountId || profile?.role !== 'ADMIN') {
       toast.error('No tienes permisos para crear empleados');
       return;
     }
@@ -203,8 +150,6 @@ const maxEmployees = account?.max_employees ?? planEmployeeLimitMap[planKey];
         throw new Error('SESSION_NOT_FOUND');
       }
 
-      const inviteRedirectTo = `${window.location.origin}/accept-invite`;
-
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-employee`, {
         method: 'POST',
         headers: {
@@ -216,8 +161,7 @@ const maxEmployees = account?.max_employees ?? planEmployeeLimitMap[planKey];
           email,
           role: sanitizedRole,
           department: canAssignDepartment ? sanitizedDepartment || null : null,
-          region: canAssignRegion ? sanitizedRegion || null : null,
-          redirectTo: inviteRedirectTo
+          region: canAssignRegion ? sanitizedRegion || null : null
         })
       });
 
@@ -248,13 +192,13 @@ const maxEmployees = account?.max_employees ?? planEmployeeLimitMap[planKey];
   };
 
   const handleUpdateEmployeeStatus = async (employeeId: string, newStatus: 'ACTIVE' | 'INACTIVE') => {
-    if (!resolvedAccountId) return;
+    if (!accountId) return;
     try {
       const { error } = await supabase
         .from('profiles')
         .update({ status: newStatus })
         .eq('id', employeeId)
-        .eq('account_id', resolvedAccountId);
+        .eq('account_id', accountId);
       
       if (error) throw error;
       
@@ -300,17 +244,16 @@ const maxEmployees = account?.max_employees ?? planEmployeeLimitMap[planKey];
   );
 
   // Check if current user is admin
-  if (!isMaster && profile?.role !== 'ADMIN') {
+  if (profile?.role !== 'ADMIN') {
     return (
       <AppLayout>
         <div className="p-6 flex items-center justify-center min-h-[400px]">
           <div className="text-center">
             <Users className="h-16 w-16 mx-auto mb-4 text-muted-foreground opacity-50" />
-            <h3 className="text-lg font-medium mb-2">Acceso restringido</h3>
-            <p className="text-muted-foreground mb-4">
-              Esta sección está reservada para administradores.
+            <h3 className="text-lg font-medium mb-2">Acceso Restringido</h3>
+            <p className="text-muted-foreground">
+              Solo los administradores pueden acceder a la gestión de empleados.
             </p>
-            <Button onClick={() => window.open('/empresa', '_self')}>Ver información de la empresa</Button>
           </div>
         </div>
       </AppLayout>
@@ -333,24 +276,16 @@ const maxEmployees = account?.max_employees ?? planEmployeeLimitMap[planKey];
   return (
     <AppLayout>
       <div className="p-6 space-y-6">
-        <CompanySummaryCard
-          account={account ?? null}
-          profile={profile ?? null}
-          planDisplay={`Plan ${planDisplay}`}
-          activeEmployees={activeEmployeesCount}
-          maxEmployees={typeof maxEmployees === 'number' ? maxEmployees : null}
-        />
-
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-3xl font-bold mb-2">{account?.name || 'Gestión de Empleados'}</h2>
+            <h2 className="text-3xl font-bold mb-2">Gestión de Empleados</h2>
             <p className="text-muted-foreground">
               Administra usuarios y permisos del sistema
             </p>
             {profile?.role === 'ADMIN' && (
               <p className={`text-sm mt-1 ${isAtEmployeeLimit ? 'text-destructive' : 'text-muted-foreground'}`}>
-                Plan {planDisplay} · {typeof maxEmployees === 'number' ? `${activeEmployeesCount}/${maxEmployees} usuarios activos` : `${activeEmployeesCount} usuarios activos`}
+                Plan {planName} · {maxEmployees ? `${activeEmployeesCount}/${maxEmployees} usuarios activos` : `${activeEmployeesCount} usuarios activos`}
               </p>
             )}
           </div>
