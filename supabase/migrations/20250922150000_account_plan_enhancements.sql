@@ -50,15 +50,28 @@ END;
 $$;
 
 -- 3. Bring existing accounts in sync with helper defaults
+WITH plan_defaults AS (
+  SELECT
+    a.id AS account_id,
+    ps.max_employees,
+    ps.can_assign_roles,
+    ps.can_assign_department,
+    ps.can_assign_region,
+    ps.can_add_custom_categories,
+    ps.monthly_expense_limit
+  FROM public.accounts a
+  CROSS JOIN LATERAL public.plan_settings(a.plan) ps
+)
 UPDATE public.accounts a
 SET
-  max_employees = ps.max_employees,
-  can_assign_roles = ps.can_assign_roles,
-  can_assign_department = ps.can_assign_department,
-  can_assign_region = ps.can_assign_region,
-  can_add_custom_categories = ps.can_add_custom_categories,
-  monthly_expense_limit = ps.monthly_expense_limit
-FROM public.plan_settings(a.plan) ps;
+  max_employees = pd.max_employees,
+  can_assign_roles = pd.can_assign_roles,
+  can_assign_department = pd.can_assign_department,
+  can_assign_region = pd.can_assign_region,
+  can_add_custom_categories = pd.can_add_custom_categories,
+  monthly_expense_limit = pd.monthly_expense_limit
+FROM plan_defaults pd
+WHERE pd.account_id = a.id;
 
 -- 4. Master user helper (uses email claim)
 CREATE OR REPLACE FUNCTION public.is_master_user()
