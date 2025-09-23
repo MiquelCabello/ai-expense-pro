@@ -38,6 +38,7 @@ interface Employee {
 
 export default function EmployeesPage() {
   const { profile, account } = useAuth();
+  const isAdmin = profile?.role === 'ADMIN';
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -110,14 +111,14 @@ export default function EmployeesPage() {
   }, [accountId]);
 
   useEffect(() => {
-    if (profile?.role === 'ADMIN') {
+    if (isAdmin) {
       fetchEmployees();
     }
-  }, [profile, accountId, fetchEmployees]);
+  }, [isAdmin, accountId, fetchEmployees]);
 
 
   const handleCreateEmployee = async () => {
-    if (!accountId || profile?.role !== 'ADMIN') {
+    if (!accountId || !isAdmin) {
       toast.error('No tienes permisos para crear empleados');
       return;
     }
@@ -244,7 +245,7 @@ export default function EmployeesPage() {
   );
 
   // Check if current user is admin
-  if (profile?.role !== 'ADMIN') {
+  if (!isAdmin) {
     return (
       <AppLayout>
         <div className="p-6 flex items-center justify-center min-h-[400px]">
@@ -283,7 +284,7 @@ export default function EmployeesPage() {
             <p className="text-muted-foreground">
               Administra usuarios y permisos del sistema
             </p>
-            {profile?.role === 'ADMIN' && (
+            {isAdmin && (
               <p className={`text-sm mt-1 ${isAtEmployeeLimit ? 'text-destructive' : 'text-muted-foreground'}`}>
                 Plan {planName} · {maxEmployees ? `${activeEmployeesCount}/${maxEmployees} usuarios activos` : `${activeEmployeesCount} usuarios activos`}
               </p>
