@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -37,18 +37,37 @@ interface Expense {
 }
 
 export default function ExpensesPage() {
-  const { profile } = useAuth();
+  const { profile, account, isMaster } = useAuth();
+  const planMonthlyLimitMap: Record<'FREE' | 'PROFESSIONAL' | 'ENTERPRISE', number | null> = {
+    FREE: 50,
+    PROFESSIONAL: null,
+    ENTERPRISE: null,
+  };
+  const planKey = (account?.plan ?? 'FREE') as 'FREE' | 'PROFESSIONAL' | 'ENTERPRISE';
+  const resolvedAccountId = !isMaster ? (profile?.account_id ?? account?.id ?? undefined) : undefined;
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
-  useEffect(() => {
-    fetchExpenses();
-  }, [profile]);
+  const fetchExpenses = useCallback(async () => {
+    if (!profile && !isMaster) {
+      setLoading(false);
+      return;
+    }
 
-  const fetchExpenses = async () => {
-    if (!profile) return;
+    if (!isMaster) {
+      if (!profile) {
+        setLoading(false);
+        return;
+      }
+      if (!resolvedAccountId) {
+        console.warn('[Expenses] Missing account_id for non-master user', profile?.id);
+        setExpenses([]);
+        setLoading(false);
+        return;
+      }
+    }
 
     try {
       setLoading(true);
@@ -61,30 +80,49 @@ export default function ExpensesPage() {
         `)
         .order('created_at', { ascending: false });
 
+      if (!isMaster && resolvedAccountId) {
+        query = query.eq('account_id', resolvedAccountId);
+      }
+
       // If employee, only show their expenses
-      if (profile.role === 'EMPLOYEE') {
+      if (!isMaster && profile?.role === 'EMPLOYEE') {
         query = query.eq('employee_id', profile.user_id);
       }
 
       const { data: expensesData, error } = await query;
-      
-      if (error) throw error;
+      if (error) {
+        throw error;
+      }
+
+      const resolvedExpenses = expensesData ?? [];
 
       // Fetch profiles for employee names (if admin)
-      let expensesWithProfiles = expensesData?.map(exp => ({ ...exp, profiles: null })) || [];
-      if (profile.role === 'ADMIN' && expensesData) {
-        const employeeIds = Array.from(new Set(expensesData.map(e => e.employee_id).filter(Boolean)));
+      let expensesWithProfiles = resolvedExpenses.map(exp => ({ ...exp, profiles: null }));
+      if ((isMaster || profile?.role === 'ADMIN') && resolvedExpenses.length > 0) {
+        const employeeIds = Array.from(new Set(resolvedExpenses.map(e => e.employee_id).filter(Boolean)));
         if (employeeIds.length > 0) {
-          const { data: profiles } = await supabase
-            .from('profiles')
-            .select('user_id, name')
-            .in('user_id', employeeIds);
-          
-          const profilesMap = profiles ? Object.fromEntries(profiles.map(p => [p.user_id, p])) : {};
-          expensesWithProfiles = expensesData.map(exp => ({
-            ...exp,
-            profiles: profilesMap[exp.employee_id] || null
-          }));
+          try {
+            let profileQuery = supabase
+              .from('profiles')
+              .select('user_id, name')
+              .in('user_id', employeeIds);
+
+            if (!isMaster && resolvedAccountId) {
+              profileQuery = profileQuery.eq('account_id', resolvedAccountId);
+            }
+
+            const { data: profiles, error: profilesError } = await profileQuery;
+
+            if (!profilesError && profiles) {
+              const profilesMap = Object.fromEntries(profiles.map(p => [p.user_id, p]));
+              expensesWithProfiles = resolvedExpenses.map(exp => ({
+                ...exp,
+                profiles: profilesMap[exp.employee_id] || null
+              }));
+            }
+          } catch (profilesError) {
+            console.warn('[Expenses] Unable to fetch employee names', profilesError);
+          }
         }
       }
 
@@ -94,7 +132,12 @@ export default function ExpensesPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [profile, resolvedAccountId, isMaster]);
+
+  useEffect(() => {
+    if (!profile && !isMaster) return;
+    fetchExpenses();
+  }, [profile, fetchExpenses, isMaster]);
 
   const getStatusBadge = (status: string) => {
     const statusMap = {
@@ -131,6 +174,14 @@ export default function ExpensesPage() {
     return matchesSearch && matchesStatus;
   });
 
+  const monthlyLimit = isMaster ? null : account?.monthly_expense_limit ?? planMonthlyLimitMap[planKey];
+  const currentMonthUsage = expenses.filter(expense => {
+    const date = new Date(expense.expense_date);
+    const now = new Date();
+    return date.getUTCFullYear() === now.getUTCFullYear() && date.getUTCMonth() === now.getUTCMonth();
+  }).length;
+  const remainingExpenses = typeof monthlyLimit === 'number' ? Math.max(monthlyLimit - currentMonthUsage, 0) : null;
+
   if (loading) {
     return (
       <AppLayout>
@@ -154,6 +205,11 @@ export default function ExpensesPage() {
             <p className="text-muted-foreground">
               Administra y revisa todos los gastos registrados
             </p>
+            {typeof monthlyLimit === 'number' && (
+              <p className={`text-sm mt-1 ${remainingExpenses === 0 ? 'text-destructive' : 'text-muted-foreground'}`}>
+                Límite mensual: {currentMonthUsage}/{monthlyLimit} gastos registrados este mes
+              </p>
+            )}
           </div>
           <div className="flex gap-2">
             <Button variant="outline" className="gap-2">

@@ -3,6 +3,7 @@ import Sidebar from './Sidebar';
 import { Bell } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { useAuth } from '@/hooks/useAuth';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -10,6 +11,7 @@ interface AppLayoutProps {
 
 export default function AppLayout({ children }: AppLayoutProps) {
   const location = useLocation();
+  const { account } = useAuth();
   
   // Get page title based on current route
   const getPageTitle = () => {
@@ -24,6 +26,8 @@ export default function AppLayout({ children }: AppLayoutProps) {
         return 'Gastos';
       case '/analisis':
         return 'Análisis';
+      case '/empresa':
+        return account?.name || 'Mi Empresa';
       case '/empleados':
         return 'Empleados';
       default:

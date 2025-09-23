@@ -1,26 +1,41 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { 
-  BarChart3, 
-  FileText, 
-  Upload, 
-  PieChart, 
-  Users, 
+import {
+  BarChart3,
+  FileText,
+  Upload,
+  PieChart,
+  Users,
   Settings,
   Search,
   Plus,
-  Bell
+  Bell,
+  Building2
 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 export default function Sidebar() {
-  const { profile, signOut } = useAuth();
+  const { profile, account, isMaster, signOut } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
+
+  const planLabel = useMemo(() => {
+    if (isMaster) return 'Master';
+    if (!account?.plan) return 'Sin plan';
+    const map: Record<'FREE' | 'PROFESSIONAL' | 'ENTERPRISE', string> = {
+      FREE: 'Starter',
+      PROFESSIONAL: 'Professional',
+      ENTERPRISE: 'Enterprise',
+    };
+    return map[account.plan];
+  }, [account?.plan, isMaster]);
+
+  const isAdmin = profile?.role === 'ADMIN' || isMaster;
+  const companyName = account?.name || 'Mi Empresa';
 
   const navigation = [
     {
@@ -47,12 +62,19 @@ export default function Sidebar() {
       icon: PieChart,
       current: location.pathname === '/analisis'
     },
-    ...(profile?.role === 'ADMIN' ? [{
-      name: 'Empleados',
-      href: '/empleados',
-      icon: Users,
-      current: location.pathname === '/empleados'
-    }] : []),
+    ...(isAdmin
+      ? [{
+        name: 'Empleados',
+        href: '/empleados',
+        icon: Users,
+        current: location.pathname === '/empleados'
+      }]
+      : [{
+        name: companyName,
+        href: '/empresa',
+        icon: Building2,
+        current: location.pathname === '/empresa'
+      }]),
     {
       name: 'Configuración',
       href: '/configuracion',
@@ -72,6 +94,9 @@ export default function Sidebar() {
           <div>
             <h1 className="text-lg font-bold">ExpenseFlow</h1>
             <p className="text-xs text-muted-foreground">Gestión de Gastos</p>
+            <Badge variant="secondary" className="mt-1">
+              Plan {planLabel}
+            </Badge>
           </div>
         </div>
       </div>

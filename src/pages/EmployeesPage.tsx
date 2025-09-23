@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import AppLayout from '@/components/AppLayout';
+import CompanySummaryCard from '@/components/CompanySummaryCard';
 import { 
   Users, 
   UserPlus, 
@@ -22,6 +23,7 @@ import {
   UserCheck,
   UserX
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
 interface Employee {
@@ -29,14 +31,16 @@ interface Employee {
   user_id: string;
   name: string;
   role: 'ADMIN' | 'EMPLOYEE';
-  department?: string;
-  region?: string;
+  department?: string | null;
+  region?: string | null;
   status: 'ACTIVE' | 'INACTIVE';
   created_at: string;
+  account_id: string;
 }
 
 export default function EmployeesPage() {
-  const { profile } = useAuth();
+  const { profile, account, isMaster } = useAuth();
+  const navigate = useNavigate();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -50,36 +54,183 @@ export default function EmployeesPage() {
   });
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 
-  useEffect(() => {
-    if (profile?.role === 'ADMIN') {
-      fetchEmployees();
-    }
-  }, [profile]);
+const planNameMap: Record<'FREE' | 'PROFESSIONAL' | 'ENTERPRISE', string> = { FREE: 'Starter', PROFESSIONAL: 'Professional', ENTERPRISE: 'Enterprise' };
+const planEmployeeLimitMap: Record<'FREE' | 'PROFESSIONAL' | 'ENTERPRISE', number | null> = {
+  FREE: 2,
+  PROFESSIONAL: 25,
+  ENTERPRISE: null,
+};
+const planKey = (account?.plan ?? 'FREE') as 'FREE' | 'PROFESSIONAL' | 'ENTERPRISE';
+const planName = planNameMap[planKey];
+const planDisplay = planName;
+const resolvedAccountId = profile?.account_id ?? account?.id ?? null;
+const maxEmployees = account?.max_employees ?? planEmployeeLimitMap[planKey];
+  const canAssignRoles = account?.can_assign_roles ?? false;
+  const canAssignDepartment = account?.can_assign_department ?? false;
+  const canAssignRegion = account?.can_assign_region ?? false;
+  const activeEmployeesCount = employees.filter(employee => employee.status === 'ACTIVE').length;
+  const isAtEmployeeLimit = typeof maxEmployees === 'number' && activeEmployeesCount >= maxEmployees;
+  const [accountIdOverride, setAccountIdOverride] = useState<string | null>(null);
 
-  const fetchEmployees = async () => {
+  const effectiveAccountId = resolvedAccountId ?? accountIdOverride;
+
+  useEffect(() => {
+    if (resolvedAccountId) {
+      setAccountIdOverride(null);
+      return;
+    }
+
+    if (!resolvedAccountId && profile?.user_id) {
+      void (async () => {
+        try {
+          const { data, error } = await supabase.rpc('get_account_id', { _uid: profile.user_id });
+          if (!error && data) {
+            setAccountIdOverride(data as string);
+          }
+        } catch (error) {
+          console.warn('[Employees] Unable to resolve account via RPC', error);
+        }
+      })();
+    }
+  }, [resolvedAccountId, profile?.user_id]);
+
+  useEffect(() => {
+    setNewEmployee(prev => ({
+      ...prev,
+      role: canAssignRoles ? prev.role : 'EMPLOYEE',
+      department: canAssignDepartment ? prev.department : '',
+      region: canAssignRegion ? prev.region : ''
+    }));
+  }, [canAssignRoles, canAssignDepartment, canAssignRegion]);
+
+  const fetchEmployees = useCallback(async () => {
+    let accountIdToUse = effectiveAccountId ?? profile?.account_id ?? account?.id ?? null;
+
+    if (!isMaster) {
+      if (!profile) {
+        setLoading(false);
+        return;
+      }
+
+      if (!accountIdToUse && profile?.user_id) {
+        try {
+          const { data, error } = await supabase.rpc('get_account_id', { _uid: profile.user_id });
+          if (!error && data) {
+            accountIdToUse = data as string;
+            setAccountIdOverride(accountIdToUse);
+          }
+        } catch (error) {
+          console.warn('[Employees] RPC get_account_id failed', error);
+        }
+      }
+
+      if (!accountIdToUse) {
+        console.warn('[Employees] Missing account_id for non-master user', profile?.id);
+        if (profile.role === 'ADMIN') {
+          accountIdToUse = profile.user_id;
+          setAccountIdOverride(accountIdToUse);
+        } else {
+          setEmployees([]);
+          setLoading(false);
+          return;
+        }
+      }
+    }
+
     try {
       setLoading(true);
-      
-      const { data, error } = await supabase
+
+      let query = supabase
         .from('profiles')
         .select('*')
         .order('created_at', { ascending: false });
-      
-      if (error) throw error;
-      
-      setEmployees(data || []);
+
+      if (!isMaster && accountIdToUse) {
+        query = query.eq('account_id', accountIdToUse);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        throw error;
+      }
+
+      setEmployees((data ?? []) as Employee[]);
     } catch (error) {
+      console.error('[Employees] fetch failed', error);
       toast.error('Error cargando empleados');
     } finally {
       setLoading(false);
     }
-  };
+  }, [effectiveAccountId, isMaster, profile, account?.id]);
+
+  useEffect(() => {
+    if (isMaster || profile?.role === 'ADMIN') {
+      fetchEmployees();
+    }
+  }, [profile, effectiveAccountId, fetchEmployees, isMaster]);
 
   const handleCreateEmployee = async () => {
+    if (profile?.role !== 'ADMIN' && !isMaster) {
+      toast.error('No tienes permisos para crear empleados');
+      return;
+    }
+
+    if (!newEmployee.name.trim()) {
+      toast.error('El nombre del empleado es obligatorio');
+      return;
+    }
+
+    const email = newEmployee.email.trim();
+    const emailRegex = /[^\s@]+@[^\s@]+\.[^\s@]+/;
+    if (!emailRegex.test(email)) {
+      toast.error('Introduce un correo electrónico válido');
+      return;
+    }
+
+    if (isAtEmployeeLimit) {
+      toast.error('Has alcanzado el número máximo de usuarios para tu plan');
+      return;
+    }
+
     try {
-      // Note: In a real implementation, you would need to handle user creation
-      // through Supabase Auth API with admin privileges
-      toast.info('Funcionalidad de creación de empleados próximamente');
+      const sanitizedRole = canAssignRoles ? newEmployee.role : 'EMPLOYEE';
+      const sanitizedDepartment = canAssignDepartment ? newEmployee.department.trim() : '';
+      const sanitizedRegion = canAssignRegion ? newEmployee.region.trim() : '';
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) {
+        throw new Error('SESSION_NOT_FOUND');
+      }
+
+      const inviteRedirectTo = `${window.location.origin}/accept-invite`;
+
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-employee`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          name: newEmployee.name.trim(),
+          email,
+          role: sanitizedRole,
+          department: canAssignDepartment ? sanitizedDepartment || null : null,
+          region: canAssignRegion ? sanitizedRegion || null : null,
+          redirectTo: inviteRedirectTo
+        })
+      });
+
+      if (!response.ok) {
+        let message = 'Error creando empleado';
+        try {
+          const payload = await response.json();
+          message = payload?.message || payload?.error || message;
+        } catch {}
+        throw new Error(message);
+      }
+
+      toast.success('Invitación enviada al nuevo empleado');
       setIsCreateDialogOpen(false);
       setNewEmployee({
         name: '',
@@ -89,17 +240,21 @@ export default function EmployeesPage() {
         region: '',
         status: 'ACTIVE'
       });
+      fetchEmployees();
     } catch (error) {
-      toast.error('Error creando empleado');
+      const message = error instanceof Error ? error.message : 'Error creando empleado';
+      toast.error(message === 'EMPLOYEE_LIMIT_REACHED' ? 'Has alcanzado el número máximo de usuarios para tu plan' : message);
     }
   };
 
   const handleUpdateEmployeeStatus = async (employeeId: string, newStatus: 'ACTIVE' | 'INACTIVE') => {
+    if (!resolvedAccountId) return;
     try {
       const { error } = await supabase
         .from('profiles')
         .update({ status: newStatus })
-        .eq('id', employeeId);
+        .eq('id', employeeId)
+        .eq('account_id', resolvedAccountId);
       
       if (error) throw error;
       
@@ -145,16 +300,17 @@ export default function EmployeesPage() {
   );
 
   // Check if current user is admin
-  if (profile?.role !== 'ADMIN') {
+  if (!isMaster && profile?.role !== 'ADMIN') {
     return (
       <AppLayout>
         <div className="p-6 flex items-center justify-center min-h-[400px]">
           <div className="text-center">
             <Users className="h-16 w-16 mx-auto mb-4 text-muted-foreground opacity-50" />
-            <h3 className="text-lg font-medium mb-2">Acceso Restringido</h3>
-            <p className="text-muted-foreground">
-              Solo los administradores pueden acceder a la gestión de empleados.
+            <h3 className="text-lg font-medium mb-2">Acceso restringido</h3>
+            <p className="text-muted-foreground mb-4">
+              Esta sección está reservada para administradores.
             </p>
+            <Button onClick={() => window.open('/empresa', '_self')}>Ver información de la empresa</Button>
           </div>
         </div>
       </AppLayout>
@@ -177,17 +333,34 @@ export default function EmployeesPage() {
   return (
     <AppLayout>
       <div className="p-6 space-y-6">
+        <CompanySummaryCard
+          account={account ?? null}
+          profile={profile ?? null}
+          planDisplay={`Plan ${planDisplay}`}
+          activeEmployees={activeEmployeesCount}
+          maxEmployees={typeof maxEmployees === 'number' ? maxEmployees : null}
+        />
+
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-3xl font-bold mb-2">Gestión de Empleados</h2>
+            <h2 className="text-3xl font-bold mb-2">{account?.name || 'Gestión de Empleados'}</h2>
             <p className="text-muted-foreground">
               Administra usuarios y permisos del sistema
             </p>
+            {profile?.role === 'ADMIN' && (
+              <p className={`text-sm mt-1 ${isAtEmployeeLimit ? 'text-destructive' : 'text-muted-foreground'}`}>
+                Plan {planDisplay} · {typeof maxEmployees === 'number' ? `${activeEmployeesCount}/${maxEmployees} usuarios activos` : `${activeEmployeesCount} usuarios activos`}
+              </p>
+            )}
           </div>
           <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
             <DialogTrigger asChild>
-              <Button className="bg-gradient-primary hover:opacity-90 gap-2">
+              <Button
+                className="bg-gradient-primary hover:opacity-90 gap-2"
+                disabled={isAtEmployeeLimit}
+                title={isAtEmployeeLimit ? 'Has alcanzado el límite de usuarios de tu plan' : undefined}
+              >
                 <UserPlus className="h-4 w-4" />
                 Nuevo Empleado
               </Button>
@@ -200,6 +373,11 @@ export default function EmployeesPage() {
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4">
+                {!canAssignRoles || !canAssignDepartment || !canAssignRegion ? (
+                  <p className="text-xs text-muted-foreground">
+                    Los empleados creados en el plan {planName} recibirán acceso estándar. Podrás ampliar estas opciones al mejorar de plan.
+                  </p>
+                ) : null}
                 <div className="space-y-2">
                   <Label htmlFor="name">Nombre Completo</Label>
                   <Input
@@ -219,38 +397,46 @@ export default function EmployeesPage() {
                     placeholder="correo@empresa.com"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="role">Rol</Label>
-                  <Select value={newEmployee.role} onValueChange={(value: 'ADMIN' | 'EMPLOYEE') => setNewEmployee({ ...newEmployee, role: value })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="EMPLOYEE">Empleado</SelectItem>
-                      <SelectItem value="ADMIN">Administrador</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
+                {canAssignRoles && (
                   <div className="space-y-2">
-                    <Label htmlFor="department">Departamento</Label>
-                    <Input
-                      id="department"
-                      value={newEmployee.department}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, department: e.target.value })}
-                      placeholder="IT, RRHH, etc."
-                    />
+                    <Label htmlFor="role">Rol</Label>
+                    <Select value={newEmployee.role} onValueChange={(value: 'ADMIN' | 'EMPLOYEE') => setNewEmployee({ ...newEmployee, role: value })}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="EMPLOYEE">Empleado</SelectItem>
+                        <SelectItem value="ADMIN">Administrador</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="region">Región</Label>
-                    <Input
-                      id="region"
-                      value={newEmployee.region}
-                      onChange={(e) => setNewEmployee({ ...newEmployee, region: e.target.value })}
-                      placeholder="Madrid, Barcelona, etc."
-                    />
+                )}
+                {(canAssignDepartment || canAssignRegion) && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {canAssignDepartment && (
+                      <div className="space-y-2">
+                        <Label htmlFor="department">Departamento</Label>
+                        <Input
+                          id="department"
+                          value={newEmployee.department}
+                          onChange={(e) => setNewEmployee({ ...newEmployee, department: e.target.value })}
+                          placeholder="IT, RRHH, etc."
+                        />
+                      </div>
+                    )}
+                    {canAssignRegion && (
+                      <div className="space-y-2">
+                        <Label htmlFor="region">Región</Label>
+                        <Input
+                          id="region"
+                          value={newEmployee.region}
+                          onChange={(e) => setNewEmployee({ ...newEmployee, region: e.target.value })}
+                          placeholder="Madrid, Barcelona, etc."
+                        />
+                      </div>
+                    )}
                   </div>
-                </div>
+                )}
                 <div className="flex justify-end gap-2 pt-4">
                   <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
                     Cancelar
@@ -263,6 +449,11 @@ export default function EmployeesPage() {
             </DialogContent>
           </Dialog>
         </div>
+        {isAtEmployeeLimit && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+            Has alcanzado el máximo de usuarios incluidos en tu plan {planName}. Actualiza de plan para invitar a más empleados.
+          </div>
+        )}
 
         {/* Search */}
         <Card className="bg-gradient-card border-0 shadow-md">

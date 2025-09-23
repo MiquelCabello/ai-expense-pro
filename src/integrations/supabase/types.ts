@@ -14,8 +14,62 @@ export type Database = {
   }
   public: {
     Tables: {
+      accounts: {
+        Row: {
+          can_add_custom_categories: boolean
+          can_assign_department: boolean
+          can_assign_region: boolean
+          can_assign_roles: boolean
+          created_at: string
+          id: string
+          monthly_expense_limit: number | null
+          max_employees: number | null
+          name: string
+          owner_user_id: string
+          plan: Database["public"]["Enums"]["account_plan"]
+          updated_at: string
+        }
+        Insert: {
+          can_add_custom_categories?: boolean
+          can_assign_department?: boolean
+          can_assign_region?: boolean
+          can_assign_roles?: boolean
+          created_at?: string
+          id?: string
+          monthly_expense_limit?: number | null
+          max_employees?: number | null
+          name: string
+          owner_user_id: string
+          plan?: Database["public"]["Enums"]["account_plan"]
+          updated_at?: string
+        }
+        Update: {
+          can_add_custom_categories?: boolean
+          can_assign_department?: boolean
+          can_assign_region?: boolean
+          can_assign_roles?: boolean
+          created_at?: string
+          id?: string
+          monthly_expense_limit?: number | null
+          max_employees?: number | null
+          name?: string
+          owner_user_id?: string
+          plan?: Database["public"]["Enums"]["account_plan"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "accounts_owner_user_id_fkey"
+            columns: ["owner_user_id"]
+            isOneToOne: true
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
       audit_logs: {
         Row: {
+          account_id: string
           action: string
           actor_user_id: string
           created_at: string
@@ -26,6 +80,7 @@ export type Database = {
           metadata: Json | null
         }
         Insert: {
+          account_id: string
           action: string
           actor_user_id: string
           created_at?: string
@@ -36,6 +91,7 @@ export type Database = {
           metadata?: Json | null
         }
         Update: {
+          account_id?: string
           action?: string
           actor_user_id?: string
           created_at?: string
@@ -45,10 +101,19 @@ export type Database = {
           ip_address?: string | null
           metadata?: Json | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "audit_logs_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          }
+        ]
       }
       categories: {
         Row: {
+          account_id: string
           budget_monthly: number | null
           created_at: string
           id: string
@@ -56,6 +121,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          account_id: string
           budget_monthly?: number | null
           created_at?: string
           id?: string
@@ -63,16 +129,26 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          account_id?: string
           budget_monthly?: number | null
           created_at?: string
           id?: string
           name?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "categories_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          }
+        ]
       }
       expenses: {
         Row: {
+          account_id: string
           amount_gross: number
           amount_net: number
           approved_at: string | null
@@ -96,6 +172,7 @@ export type Database = {
           vendor: string
         }
         Insert: {
+          account_id: string
           amount_gross: number
           amount_net: number
           approved_at?: string | null
@@ -119,6 +196,7 @@ export type Database = {
           vendor: string
         }
         Update: {
+          account_id?: string
           amount_gross?: number
           amount_net?: number
           approved_at?: string | null
@@ -150,6 +228,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "expenses_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "expenses_project_code_id_fkey"
             columns: ["project_code_id"]
             isOneToOne: false
@@ -167,6 +252,7 @@ export type Database = {
       }
       files: {
         Row: {
+          account_id: string
           checksum_sha256: string
           created_at: string
           id: string
@@ -178,6 +264,7 @@ export type Database = {
           uploaded_by: string
         }
         Insert: {
+          account_id: string
           checksum_sha256: string
           created_at?: string
           id?: string
@@ -189,6 +276,7 @@ export type Database = {
           uploaded_by: string
         }
         Update: {
+          account_id?: string
           checksum_sha256?: string
           created_at?: string
           id?: string
@@ -199,10 +287,19 @@ export type Database = {
           storage_key?: string
           uploaded_by?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "files_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          }
+        ]
       }
       profiles: {
         Row: {
+          account_id: string
           created_at: string
           department: string | null
           id: string
@@ -214,6 +311,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          account_id: string
           created_at?: string
           department?: string | null
           id?: string
@@ -225,6 +323,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          account_id?: string
           created_at?: string
           department?: string | null
           id?: string
@@ -235,10 +334,19 @@ export type Database = {
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "profiles_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          }
+        ]
       }
       project_codes: {
         Row: {
+          account_id: string
           code: string
           created_at: string
           id: string
@@ -247,6 +355,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          account_id: string
           code: string
           created_at?: string
           id?: string
@@ -255,6 +364,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          account_id?: string
           code?: string
           created_at?: string
           id?: string
@@ -262,7 +372,15 @@ export type Database = {
           status?: Database["public"]["Enums"]["project_status"]
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "project_codes_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          }
+        ]
       }
     }
     Views: {
@@ -273,8 +391,24 @@ export type Database = {
         Args: { _uid: string }
         Returns: boolean
       }
+      is_master_user: {
+        Args: Record<PropertyKey, never>
+        Returns: boolean
+      }
+      plan_settings: {
+        Args: { _plan: Database["public"]["Enums"]["account_plan"] }
+        Returns: {
+          max_employees: number | null
+          can_assign_roles: boolean
+          can_assign_department: boolean
+          can_assign_region: boolean
+          can_add_custom_categories: boolean
+          monthly_expense_limit: number | null
+        }[]
+      }
     }
     Enums: {
+      account_plan: "FREE" | "PROFESSIONAL" | "ENTERPRISE"
       expense_source: "MANUAL" | "AI_EXTRACTED"
       expense_status: "PENDING" | "APPROVED" | "REJECTED"
       payment_method: "CARD" | "CASH" | "TRANSFER" | "OTHER"

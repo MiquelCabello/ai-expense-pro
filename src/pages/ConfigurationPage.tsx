@@ -35,7 +35,7 @@ const isValidThemePreference = (value: unknown): value is 'light' | 'dark' | 'sy
   value === 'light' || value === 'dark' || value === 'system';
 
 export default function ConfigurationPage() {
-  const { profile, account, isMaster } = useAuth();
+  const { profile, account, isMaster, user } = useAuth();
   const { theme, setTheme } = useTheme();
   const [categories, setCategories] = useState<Category[]>([]);
   const [projectCodes, setProjectCodes] = useState<ProjectCode[]>([]);
@@ -86,6 +86,8 @@ export default function ConfigurationPage() {
   const categoryLimit = planConfig[planKey].categoryLimit;
   const projectLimit = planConfig[planKey].projectLimit;
   const isCategoriesEnabled = planKey !== 'FREE';
+  const categoriesLimitReached = typeof categoryLimit === 'number' && categories.length >= categoryLimit;
+  const projectLimitReached = typeof projectLimit === 'number' && projectCodes.length >= projectLimit;
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -211,6 +213,19 @@ export default function ConfigurationPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  const saveCompanyProfile = async (event: React.FormEvent) => {
+    event.preventDefault();
+
+    if (!account || !profile) {
+      toast.error('No se ha podido cargar la cuenta activa');
+      return;
+    }
+
+    // Placeholder: simulate persistence
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    toast.success('Datos de la empresa guardados (placeholder)');
+  };
 
   const saveFinancialConfig = async () => {
     try {
@@ -509,6 +524,60 @@ export default function ConfigurationPage() {
           </CardContent>
         </Card>
 
+        {!isMaster && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <Briefcase className="h-5 w-5" />
+                <span>Datos de la empresa</span>
+              </CardTitle>
+              <CardDescription>
+                Información básica de tu organización. Se mostrará como referencia a tus empleados.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={saveCompanyProfile} className="grid gap-4 md:grid-cols-2">
+                <div className="md:col-span-2 space-y-2">
+                  <Label>Nombre comercial</Label>
+                  <Input defaultValue={account?.name ?? ''} placeholder="Nombre de la empresa" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Sector</Label>
+                  <Select defaultValue="services">
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecciona sector" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="services">Servicios profesionales</SelectItem>
+                      <SelectItem value="retail">Retail</SelectItem>
+                      <SelectItem value="manufacturing">Manufactura</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Sede principal</Label>
+                  <Input defaultValue={profile?.region ?? ''} placeholder="Ciudad / Región" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Correo de contacto</Label>
+                  <Input type="email" defaultValue={user?.email ?? ''} placeholder="contacto@empresa.com" />
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <Label>Descripción breve</Label>
+                  <textarea
+                    className="w-full border rounded-md p-2 text-sm"
+                    rows={3}
+                    placeholder="Describe brevemente tu empresa y sus principales operaciones"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <Button type="submit">Guardar datos de la empresa</Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Preferencias Generales */}
           <Card>
@@ -640,331 +709,371 @@ export default function ConfigurationPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Gestión de Categorías */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center space-x-2">
-                <FolderOpen className="h-5 w-5" />
-                <span>Gestión de Categorías</span>
-              </CardTitle>
-              <CardDescription>Categorías Activas</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {categories.map((category) => (
-                <div
-                  key={category.id}
-                  className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-                    <div className="w-2 h-2 rounded-full bg-primary"></div>
-                    <span className="font-medium">{category.name}</span>
-                    {category.budget_monthly && (
-                      <Badge variant="outline">
-                        Presupuesto: {category.budget_monthly}€/mes
-                      </Badge>
-                    )}
+          {isCategoriesEnabled ? (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <FolderOpen className="h-5 w-5" />
+                    <span>Gestión de Categorías</span>
                   </div>
-                  <div className="flex flex-wrap gap-2 sm:flex-nowrap sm:justify-end">
-                    <Dialog open={editingCategory?.id === category.id} onOpenChange={(open) => !open && setEditingCategory(null)}>
-                      <DialogTrigger asChild>
-                        <Button variant="outline" size="sm" onClick={() => handleEditCategory(category)}>
-                          <Edit2 className="h-4 w-4 mr-1" />
-                          Editar
-                        </Button>
-                      </DialogTrigger>
-                      <DialogContent>
-                        <DialogHeader>
-                          <DialogTitle>Editar Categoría</DialogTitle>
-                          <DialogDescription>
-                            Modifica los datos de la categoría
-                          </DialogDescription>
-                        </DialogHeader>
-                        <div className="space-y-4">
-                          <div>
-                            <Label htmlFor="category-name">Nombre</Label>
-                            <Input
-                              id="category-name"
-                              value={newCategoryName}
-                              onChange={(e) => setNewCategoryName(e.target.value)}
-                              placeholder="Nombre de la categoría"
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="category-budget">Presupuesto Mensual (€)</Label>
-                            <Input
-                              id="category-budget"
-                              type="number"
-                              value={newCategoryBudget}
-                              onChange={(e) => setNewCategoryBudget(e.target.value)}
-                              placeholder="0"
-                            />
-                          </div>
-                          <div className="flex justify-end space-x-2">
-                            <Button variant="outline" onClick={() => setEditingCategory(null)}>
-                              Cancelar
-                            </Button>
-                            <Button onClick={handleUpdateCategory}>
-                              Guardar
-                            </Button>
-                          </div>
-                        </div>
-                      </DialogContent>
-                    </Dialog>
-                    <Button variant="destructive" size="sm" onClick={() => setCategoryToDelete(category)}>
-                      <Trash2 className="h-4 w-4 mr-1" />
-                      Eliminar
-                    </Button>
-                  </div>
+                  {typeof categoryLimit === 'number' && (
+                    <Badge variant={categoriesLimitReached ? 'destructive' : 'outline'}>
+                      {categories.length}/{categoryLimit}
+                    </Badge>
+                  )}
                 </div>
-              ))}
-
-              <AlertDialog
-                open={!!categoryToDelete}
-                onOpenChange={(open) => {
-                  if (!open && !isDeletingCategory) {
-                    setCategoryToDelete(null);
-                  }
-                }}
-              >
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      Esta acción eliminará permanentemente la categoría "{categoryToDelete?.name}".
-                      No se puede deshacer.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel disabled={isDeletingCategory}>Cancelar</AlertDialogCancel>
-                    <AlertDialogAction
-                      disabled={isDeletingCategory}
-                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                      onClick={async (event) => {
-                        event.preventDefault();
-                        await handleDeleteCategory();
-                      }}
-                    >
-                      {isDeletingCategory ? 'Eliminando...' : 'Eliminar'}
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-              
-              <Dialog open={isAddingCategory} onOpenChange={setIsAddingCategory}>
-                <DialogTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className="w-full"
-                    disabled={!canAddCustomCategories}
-                    title={!canAddCustomCategories ? 'Disponible solo en el plan Enterprise' : undefined}
+                <CardDescription>Categorías activas en tu cuenta</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {categories.map((category) => (
+                  <div
+                    key={category.id}
+                    className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between"
                   >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Añadir Categoría
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Nueva Categoría</DialogTitle>
-                    <DialogDescription>
-                      Añade una nueva categoría de gastos
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div className="space-y-4">
-                    <div>
-                      <Label htmlFor="new-category-name">Nombre</Label>
-                      <Input
-                        id="new-category-name"
-                        value={newCategoryName}
-                        onChange={(e) => setNewCategoryName(e.target.value)}
-                        placeholder="Nombre de la categoría"
-                      />
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                      <div className="w-2 h-2 rounded-full bg-primary"></div>
+                      <span className="font-medium">{category.name}</span>
+                      {category.budget_monthly && (
+                        <Badge variant="outline">
+                          Presupuesto: {category.budget_monthly}€/mes
+                        </Badge>
+                      )}
                     </div>
-                    <div>
-                      <Label htmlFor="new-category-budget">Presupuesto Mensual (€)</Label>
-                      <Input
-                        id="new-category-budget"
-                        type="number"
-                        value={newCategoryBudget}
-                        onChange={(e) => setNewCategoryBudget(e.target.value)}
-                        placeholder="0"
-                      />
-                    </div>
-                    <div className="flex justify-end space-x-2">
-                      <Button variant="outline" onClick={() => {
-                        setIsAddingCategory(false);
-                        setNewCategoryName('');
-                        setNewCategoryBudget('');
-                      }}>
-                        Cancelar
-                      </Button>
-                      <Button onClick={handleAddCategory}>
-                        Añadir
+                    <div className="flex flex-wrap gap-2 sm:flex-nowrap sm:justify-end">
+                      <Dialog open={editingCategory?.id === category.id} onOpenChange={(open) => !open && setEditingCategory(null)}>
+                        <DialogTrigger asChild>
+                          <Button variant="outline" size="sm" onClick={() => handleEditCategory(category)}>
+                            <Edit2 className="h-4 w-4 mr-1" />
+                            Editar
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                          <DialogHeader>
+                            <DialogTitle>Editar Categoría</DialogTitle>
+                            <DialogDescription>
+                              Modifica los datos de la categoría
+                            </DialogDescription>
+                          </DialogHeader>
+                          <div className="space-y-4">
+                            <div>
+                              <Label htmlFor="category-name">Nombre</Label>
+                              <Input
+                                id="category-name"
+                                value={newCategoryName}
+                                onChange={(e) => setNewCategoryName(e.target.value)}
+                                placeholder="Nombre de la categoría"
+                              />
+                            </div>
+                            <div>
+                              <Label htmlFor="category-budget">Presupuesto Mensual (€)</Label>
+                              <Input
+                                id="category-budget"
+                                type="number"
+                                value={newCategoryBudget}
+                                onChange={(e) => setNewCategoryBudget(e.target.value)}
+                                placeholder="0"
+                              />
+                            </div>
+                            <div className="flex justify-end space-x-2">
+                              <Button variant="outline" onClick={() => setEditingCategory(null)}>
+                                Cancelar
+                              </Button>
+                              <Button onClick={handleUpdateCategory}>
+                                Guardar
+                              </Button>
+                            </div>
+                          </div>
+                        </DialogContent>
+                      </Dialog>
+                      <Button variant="destructive" size="sm" onClick={() => setCategoryToDelete(category)}>
+                        <Trash2 className="h-4 w-4 mr-1" />
+                        Eliminar
                       </Button>
                     </div>
                   </div>
-                </DialogContent>
-              </Dialog>
-              {!canAddCustomCategories && (
-                <p className="mt-3 text-xs text-muted-foreground text-center">
-                  Añadir categorías personalizadas es exclusivo del plan Enterprise.
-                </p>
-              )}
-            </CardContent>
-          </Card>
+                ))}
 
-          {/* Códigos de Proyecto */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center space-x-2">
-                <Briefcase className="h-5 w-5" />
-                <span>Códigos de Proyecto</span>
-              </CardTitle>
-              <CardDescription>Proyectos Activos</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {projectCodes.map((project) => (
-                <div
-                  key={project.id}
-                  className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between"
+                <AlertDialog
+                  open={!!categoryToDelete}
+                  onOpenChange={(open) => {
+                    if (!open && !isDeletingCategory) {
+                      setCategoryToDelete(null);
+                    }
+                  }}
                 >
-                  <div>
-                    <div className="font-medium">{project.code}</div>
-                    <div className="text-sm text-muted-foreground">{project.name}</div>
-                  </div>
-                  <div className="flex flex-wrap gap-2 sm:flex-nowrap sm:justify-end">
-                    <Dialog open={editingProject?.id === project.id} onOpenChange={(open) => !open && setEditingProject(null)}>
-                      <DialogTrigger asChild>
-                        <Button variant="outline" size="sm" onClick={() => handleEditProject(project)}>
-                          <Edit2 className="h-4 w-4 mr-1" />
-                          Editar
-                        </Button>
-                      </DialogTrigger>
-                      <DialogContent>
-                        <DialogHeader>
-                          <DialogTitle>Editar Código de Proyecto</DialogTitle>
-                          <DialogDescription>
-                            Modifica los datos del código de proyecto
-                          </DialogDescription>
-                        </DialogHeader>
-                        <div className="space-y-4">
-                          <div>
-                            <Label htmlFor="project-code">Código</Label>
-                            <Input
-                              id="project-code"
-                              value={newProjectCode}
-                              onChange={(e) => setNewProjectCode(e.target.value)}
-                              placeholder="Código del proyecto"
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="project-name">Nombre</Label>
-                            <Input
-                              id="project-name"
-                              value={newProjectName}
-                              onChange={(e) => setNewProjectName(e.target.value)}
-                              placeholder="Nombre del proyecto"
-                            />
-                          </div>
-                          <div className="flex justify-end space-x-2">
-                            <Button variant="outline" onClick={() => setEditingProject(null)}>
-                              Cancelar
-                            </Button>
-                            <Button onClick={handleUpdateProject}>
-                              Guardar
-                            </Button>
-                          </div>
-                        </div>
-                      </DialogContent>
-                    </Dialog>
-                    <Button variant="destructive" size="sm" onClick={() => setProjectToDelete(project)}>
-                      <Trash2 className="h-4 w-4 mr-1" />
-                      Desactivar
-                    </Button>
-                  </div>
-                </div>
-              ))}
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Esta acción eliminará permanentemente la categoría "{categoryToDelete?.name}".
+                        No se puede deshacer.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel disabled={isDeletingCategory}>Cancelar</AlertDialogCancel>
+                      <AlertDialogAction
+                        disabled={isDeletingCategory}
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        onClick={async (event) => {
+                          event.preventDefault();
+                          await handleDeleteCategory();
+                        }}
+                      >
+                        {isDeletingCategory ? 'Eliminando...' : 'Eliminar'}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
 
-              <AlertDialog
-                open={!!projectToDelete}
-                onOpenChange={(open) => {
-                  if (!open && !isDeletingProject) {
-                    setProjectToDelete(null);
-                  }
-                }}
-              >
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      Esta acción desactivará el código de proyecto "{projectToDelete?.code}".
-                      No podrá ser utilizado en nuevos gastos.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel disabled={isDeletingProject}>Cancelar</AlertDialogCancel>
-                    <AlertDialogAction
-                      disabled={isDeletingProject}
-                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                      onClick={async (event) => {
-                        event.preventDefault();
-                        await handleDeleteProject();
-                      }}
+                <Dialog open={isAddingCategory} onOpenChange={setIsAddingCategory}>
+                  <DialogTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      disabled={!canAddCustomCategories || categoriesLimitReached}
+                      title={
+                        !canAddCustomCategories
+                          ? 'Disponible a partir del plan Professional'
+                          : categoriesLimitReached
+                            ? `Has alcanzado el límite de ${categoryLimit} categorías`
+                            : undefined
+                      }
                     >
-                      {isDeletingProject ? 'Desactivando...' : 'Desactivar'}
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-              
-              <Dialog open={isAddingProject} onOpenChange={setIsAddingProject}>
-                <DialogTrigger asChild>
-                  <Button className="w-full bg-primary hover:bg-primary/90">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Añadir Proyecto
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Nuevo Código de Proyecto</DialogTitle>
-                    <DialogDescription>
-                      Añade un nuevo código de proyecto
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div className="space-y-4">
-                    <div>
-                      <Label htmlFor="new-project-code">Código</Label>
-                      <Input
-                        id="new-project-code"
-                        value={newProjectCode}
-                        onChange={(e) => setNewProjectCode(e.target.value)}
-                        placeholder="Código del proyecto"
-                      />
+                      <Plus className="h-4 w-4 mr-2" />
+                      Nueva Categoría
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Nueva Categoría</DialogTitle>
+                      <DialogDescription>Define una categoría personalizada para clasificar tus gastos</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      <div>
+                        <Label htmlFor="category-new-name">Nombre</Label>
+                        <Input
+                          id="category-new-name"
+                          value={newCategoryName}
+                          onChange={(e) => setNewCategoryName(e.target.value)}
+                          placeholder="Nombre de la categoría"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="category-new-budget">Presupuesto Mensual (€)</Label>
+                        <Input
+                          id="category-new-budget"
+                          type="number"
+                          value={newCategoryBudget}
+                          onChange={(e) => setNewCategoryBudget(e.target.value)}
+                          placeholder="0"
+                        />
+                      </div>
+                      <div className="flex justify-end space-x-2">
+                        <Button variant="outline" onClick={() => setIsAddingCategory(false)}>
+                          Cancelar
+                        </Button>
+                        <Button onClick={handleAddCategory}>
+                          Crear
+                        </Button>
+                      </div>
                     </div>
-                    <div>
-                      <Label htmlFor="new-project-name">Nombre</Label>
-                      <Input
-                        id="new-project-name"
-                        value={newProjectName}
-                        onChange={(e) => setNewProjectName(e.target.value)}
-                        placeholder="Nombre del proyecto"
-                      />
+                  </DialogContent>
+                </Dialog>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="opacity-90">
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <FolderOpen className="h-5 w-5" />
+                  <span>Gestión de Categorías</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">
+                  Las categorías personalizadas están disponibles a partir del plan Professional.
+                </p>
+                <Button className="mt-4" variant="outline" onClick={handleUpgradeClick}>Ver planes</Button>
+              </CardContent>
+            </Card>
+          )}
+          {canManageProjects ? (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <Briefcase className="h-5 w-5" />
+                    <span>Gestión de Códigos de Proyecto</span>
+                  </div>
+                  {typeof projectLimit === 'number' && (
+                    <Badge variant={projectLimitReached ? 'destructive' : 'outline'}>
+                      {projectCodes.length}/{projectLimit}
+                    </Badge>
+                  )}
+                </div>
+                <CardDescription>Códigos activos para clasificar gastos</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {projectCodes.map((project) => (
+                  <div
+                    key={project.id}
+                    className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                      <div className="w-2 h-2 rounded-full bg-primary"></div>
+                      <span className="font-medium">{project.code}</span>
+                      <Badge variant="outline">{project.name}</Badge>
                     </div>
-                    <div className="flex justify-end space-x-2">
-                      <Button variant="outline" onClick={() => {
-                        setIsAddingProject(false);
-                        setNewProjectCode('');
-                        setNewProjectName('');
-                      }}>
-                        Cancelar
-                      </Button>
-                      <Button onClick={handleAddProject}>
-                        Añadir
+                    <div className="flex flex-wrap gap-2 sm:flex-nowrap sm:justify-end">
+                      <Dialog open={editingProject?.id === project.id} onOpenChange={(open) => !open && setEditingProject(null)}>
+                        <DialogTrigger asChild>
+                          <Button variant="outline" size="sm" onClick={() => handleEditProject(project)}>
+                            <Edit2 className="h-4 w-4 mr-1" />
+                            Editar
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                          <DialogHeader>
+                            <DialogTitle>Editar Código</DialogTitle>
+                            <DialogDescription>
+                              Actualiza la información del código de proyecto
+                            </DialogDescription>
+                          </DialogHeader>
+                          <div className="space-y-4">
+                            <div>
+                              <Label htmlFor="project-code">Código</Label>
+                              <Input
+                                id="project-code"
+                                value={newProjectCode}
+                                onChange={(e) => setNewProjectCode(e.target.value)}
+                                placeholder="PRJ-001"
+                              />
+                            </div>
+                            <div>
+                              <Label htmlFor="project-name">Nombre</Label>
+                              <Input
+                                id="project-name"
+                                value={newProjectName}
+                                onChange={(e) => setNewProjectName(e.target.value)}
+                                placeholder="Nombre del proyecto"
+                              />
+                            </div>
+                            <div className="flex justify-end space-x-2">
+                              <Button variant="outline" onClick={() => setEditingProject(null)}>
+                                Cancelar
+                              </Button>
+                              <Button onClick={handleUpdateProject}>
+                                Guardar
+                              </Button>
+                            </div>
+                          </div>
+                        </DialogContent>
+                      </Dialog>
+                      <Button variant="destructive" size="sm" onClick={() => setProjectToDelete(project)}>
+                        <Trash2 className="h-4 w-4 mr-1" />
+                        Desactivar
                       </Button>
                     </div>
                   </div>
-                </DialogContent>
-              </Dialog>
-            </CardContent>
-          </Card>
+                ))}
+
+                <AlertDialog
+                  open={!!projectToDelete}
+                  onOpenChange={(open) => {
+                    if (!open && !isDeletingProject) {
+                      setProjectToDelete(null);
+                    }
+                  }}
+                >
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Esta acción desactivará el código "{projectToDelete?.code}".
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel disabled={isDeletingProject}>Cancelar</AlertDialogCancel>
+                      <AlertDialogAction
+                        disabled={isDeletingProject}
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        onClick={async (event) => {
+                          event.preventDefault();
+                          await handleDeleteProject();
+                        }}
+                      >
+                        {isDeletingProject ? 'Desactivando...' : 'Desactivar'}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+
+                <Dialog open={isAddingProject} onOpenChange={setIsAddingProject}>
+                  <DialogTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      disabled={projectLimitReached}
+                      title={projectLimitReached ? `Has alcanzado el límite de ${projectLimit} códigos de proyecto` : undefined}
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Nuevo Código de Proyecto
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Nuevo Código de Proyecto</DialogTitle>
+                      <DialogDescription>Crea un código para agrupar tus gastos</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      <div>
+                        <Label htmlFor="project-new-code">Código</Label>
+                        <Input
+                          id="project-new-code"
+                          value={newProjectCode}
+                          onChange={(e) => setNewProjectCode(e.target.value)}
+                          placeholder="PRJ-002"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="project-new-name">Nombre</Label>
+                        <Input
+                          id="project-new-name"
+                          value={newProjectName}
+                          onChange={(e) => setNewProjectName(e.target.value)}
+                          placeholder="Nombre del proyecto"
+                        />
+                      </div>
+                      <div className="flex justify-end space-x-2">
+                        <Button variant="outline" onClick={() => setIsAddingProject(false)}>
+                          Cancelar
+                        </Button>
+                        <Button onClick={handleAddProject}>
+                          Crear
+                        </Button>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="opacity-90">
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <Briefcase className="h-5 w-5" />
+                  <span>Gestión de Códigos de Proyecto</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">
+                  Los códigos de proyecto personalizados están disponibles a partir del plan Professional.
+                </p>
+                <Button className="mt-4" variant="outline" onClick={handleUpgradeClick}>Ver planes</Button>
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
     </AppLayout>

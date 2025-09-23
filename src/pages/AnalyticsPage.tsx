@@ -23,6 +23,7 @@ interface AnalyticsData {
 
 export default function AnalyticsPage() {
   const { profile } = useAuth()
+  const accountId = profile?.account_id ?? null
   const [analytics, setAnalytics] = useState<AnalyticsData>({
     totalExpenses: 0,
     expenseCount: 0,
@@ -36,12 +37,13 @@ export default function AnalyticsPage() {
   const [statusFilter, setStatusFilter] = useState<'APPROVED' | 'PENDING' | 'REJECTED' | 'ALL'>('APPROVED')
 
   useEffect(() => {
+    if (!profile || !accountId) return
     fetchAnalytics()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile, timeRange, statusFilter])
+  }, [profile, accountId, timeRange, statusFilter])
 
   const fetchAnalytics = async () => {
-    if (!profile) return
+    if (!profile || !accountId) return
 
     try {
       setLoading(true)
@@ -68,6 +70,7 @@ export default function AnalyticsPage() {
       let query = supabase
         .from('expenses')
         .select(`*, categories(name)`) // NOTE: join simple para nombre de categoría
+        .eq('account_id', accountId)
         .gte('expense_date', toLocalISODate(startDate))
         .lte('expense_date', toLocalISODate(endDate))
 

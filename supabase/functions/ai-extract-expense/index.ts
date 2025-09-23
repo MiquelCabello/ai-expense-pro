@@ -1,52 +1,54 @@
-// Ruta: supabase/functions/ai-extract-expense/index.ts
-// Descripción: Edge Function con flujo de **doble pasada** a Gemini.
-//  1) Clasifica (Ticket|Factura)  2) Extrae campos guiado por el tipo.
-//  Temperatura 0, JSON estricto, retries y normalización con fallbacks conservadores.
-//  Respuesta: { success: true, data: {...}, meta: { reason, confidence, timings } }
-// Anotaciones: este archivo incluye comentarios breves (NOTE / RATIONALE / TODO).
+/// <reference path="../types.d.ts" />
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
-// ==========================
-// Utilidades básicas de HTTP
-// ==========================
 const json = (body: unknown, init: ResponseInit = {}) =>
   new Response(JSON.stringify(body), {
     headers: { "Content-Type": "application/json", ...(init.headers || {}) },
     status: init.status ?? 200,
   })
 
-// ======================
-// Tipos de la respuesta
-// ======================
 type DocType = 'FACTURA' | 'TICKET'
 
 type ClassifyResult = {
   type: DocType
   reason?: string
-  confidence?: number // 0..1
+  confidence?: number
 }
 
-type ExtractResult = {
-  vendor?: string | null
-  expense_date?: string | null // YYYY-MM-DD
-  amount_gross?: number | null
-  tax_vat?: number | null
-  amount_net?: number | null
-  currency?: string | null
-  category_guess?: string | null
-  invoice_number?: string | null
-  tax_id?: string | null
-  address?: string | null
-  email?: string | null
-  notes?: string | null
-  raw_text?: string | null
+type InvoiceExtractResult = {
+  vendor: string | null
+  expense_date: string | null
+  amount_gross: number | null
+  tax_vat: number | null
+  amount_net: number | null
+  currency: string | null
+  invoice_number: string | null
+  seller_tax_id: string | null
+  buyer_tax_id: string | null
+  tax_id: string | null
+  email: string | null
+  notes: string | null
+  ocr_text: string | null
 }
 
-// ================
-// Gemini helpers
-// ================
-const GEMINI_MODEL = Deno.env.get('GEMINI_MODEL') || 'gemini-1.5-flash-latest'
+type TicketExtractResult = {
+  vendor: string | null
+  expense_date: string | null
+  amount_total: number | null
+  tax_vat: number | null
+  amount_net: number | null
+  currency: string | null
+  payment_method: string | null
+  notes: string | null
+  ocr_text: string | null
+}
+
+type ExtractionOutcome =
+  | { type: 'FACTURA'; data: InvoiceExtractResult }
+  | { type: 'TICKET'; data: TicketExtractResult }
+
+const GEMINI_MODEL = Deno.env.get('GEMINI_MODEL') || 'gemini-1.5-pro-latest'
 
 async function callGeminiJSON({
   apiKey,
@@ -68,19 +70,13 @@ async function callGeminiJSON({
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
   const body = {
     contents: [
-      {
-        role: 'user',
-        parts: [
-          { text: prompt },
-          { inlineData: { data: base64, mimeType: mime } },
-        ],
-      },
+      { role: 'user', parts: [ { text: prompt }, { inlineData: { data: base64, mimeType: mime } } ] },
     ],
     generationConfig: {
       temperature: 0,
       topP: 1,
       topK: 1,
-      maxOutputTokens: 2048,
+      maxOutputTokens: 4096,
       response_mime_type: responseMime,
     },
   }
@@ -88,16 +84,11 @@ async function callGeminiJSON({
   let lastErr: unknown
   for (let i = 0; i <= retries; i++) {
     try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`)
-      const json = await res.json()
-      const text = json?.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+      const j = await res.json()
+      const text = j?.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
       if (!text) throw new Error('Gemini sin contenido')
-      // NOTE: robustez ante texto accesorio
       const parsed = safeJsonParseFromText(text)
       if (!parsed) throw new Error('Gemini devolvió texto no-JSON')
       return parsed
@@ -109,25 +100,18 @@ async function callGeminiJSON({
   throw lastErr ?? new Error('Gemini fallo desconocido')
 }
 
-// ==========================
-// Prompts de doble pasada
-// ==========================
 function buildClassifyPrompt(fileName: string) {
-  return `Eres un clasificador de documentos de gasto. Devuelve SOLO JSON válido.\nReglas de clasificación:\n- Si ves "Factura simplificada" / "Simplified invoice" => TICKET.\n- Si aparece la palabra "Factura" o "Invoice" o hay un número de factura visible => FACTURA.\n- La presencia de CIF/NIF/VAT **no** basta por sí sola para FACTURA (los tickets pueden llevarlo).\n- En duda, elige TICKET.\nFormato EXACTO:\n{"type":"FACTURA|TICKET","reason":"...","confidence":0..1}\n\nContexto:\n- Nombre de archivo: ${fileName}\n- Si encuentras texto irrelevante, ignóralo.`
+  return `Eres un clasificador de documentos de gasto. Devuelve SOLO JSON válido.\n\nReglas (en orden):\n1) Si ves "Factura simplificada" / "Simplified invoice" => "TICKET".\n2) Si detectas DOS identificadores fiscales distintos (NIF/NIE/CIF/VAT, vendedor+comprador) => "FACTURA".\n3) Si hay Nº de factura visible (p. ej., "Factura #", "Invoice No.", "FAC-2024-...") => "FACTURA".\n4) Si aparece la palabra "Factura" o "Invoice" (y NO dice "simplificada") => "FACTURA".\n5) Un único CIF/NIF/VAT NO basta por sí solo.\n6) Si de verdad no puedes decidir => "TICKET".\n\nFormato EXACTO: {"type":"FACTURA|TICKET","reason":"...","confidence":0..1}\n\nContexto:\n- Nombre de archivo: ${fileName}`
 }
 
-function buildExtractPrompt(kind: DocType) {
-  const pressure =
-    kind === 'FACTURA'
-      ? `Prioriza extraer "invoice_number" si existe (no inventes).`
-      : `No inventes "invoice_number"; déjalo null salvo que se vea claramente.`
-
-  return `Eres un extractor de datos de ${kind.toLowerCase()}s. Devuelve SOLO JSON válido con estas claves (usa null si no aplica):\n{\n  "vendor": string|null,\n  "expense_date": string|null, // YYYY-MM-DD\n  "amount_gross": number|null,\n  "tax_vat": number|null,\n  "amount_net": number|null,\n  "currency": string|null,\n  "category_guess": string|null,\n  "invoice_number": string|null,\n  "tax_id": string|null,\n  "address": string|null,\n  "email": string|null,\n  "notes": string|null,\n  "raw_text": string|null\n}\n\nPolíticas:\n- ${pressure}\n- No alucines: si dudas, usa null.\n- "expense_date" en formato YYYY-MM-DD si puedes inferirla; si no, null.\n- Los importes son números con "." decimal.\n- "raw_text": pega solo líneas clave (CIF/NIF/VAT, Nº factura, totales, fecha), no todo el OCR.`
+function buildInvoiceExtractPrompt() {
+  return `Eres un extractor de datos de FACTURAS. Devuelve SOLO JSON válido con estas claves (usa null si no aplica):\n{\n  "vendor": string|null,\n  "expense_date": string|null,        // YYYY-MM-DD\n  "amount_gross": number|null,\n  "tax_vat": number|null,\n  "amount_net": number|null,\n  "currency": string|null,\n  "invoice_number": string|null,\n  "seller_tax_id": string|null,\n  "buyer_tax_id": string|null,\n  "tax_id": string|null,\n  "email": string|null,\n  "notes": string|null,\n  "ocr_text": string|null             // TEXTO OCR COMPLETO\n}\n\nReglas:\n- "expense_date" en formato YYYY-MM-DD si es posible.\n- Importes con punto decimal (ej. 1234.56).\n- Si no observas el dato, devuelve null.\n- No inventes números de factura ni identificadores fiscales.\n- "ocr_text" debe contener TODO el texto legible tal como aparece.`
 }
 
-// ==========================
-// Lógica principal
-// ==========================
+function buildTicketExtractPrompt() {
+  return `Eres un extractor de datos de TICKETS o RECIBOS SIMPLIFICADOS. Devuelve SOLO JSON válido con estas claves (usa null si no aplica):\n{\n  "vendor": string|null,\n  "expense_date": string|null,        // YYYY-MM-DD\n  "amount_total": number|null,\n  "tax_vat": number|null,\n  "amount_net": number|null,\n  "currency": string|null,\n  "payment_method": string|null,\n  "notes": string|null,\n  "ocr_text": string|null             // TEXTO OCR COMPLETO\n}\n\nReglas:\n- "expense_date" en formato YYYY-MM-DD si es posible.\n- Importes con punto decimal (ej. 45.90).\n- Si no ves el dato, usa null.\n- No inventes métodos de pago ni importes.\n- "ocr_text" debe contener TODO el texto legible tal como aparece.`
+}
+
 serve(async (req: Request) => {
   try {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204 })
@@ -154,7 +138,7 @@ serve(async (req: Request) => {
 
     if (!file && !fileUrl) return json({ success: false, error: 'No se recibió archivo ni URL' }, { status: 400 })
 
-    const fileName = (file?.name || fileUrl.split('?')[0].split('/').pop() || 'document')
+    const fileName = (file?.name || fileUrl.split('?')[0].split('/').pop() || 'documento')
 
     let base64 = ''
     let mime = mime_type || 'application/octet-stream'
@@ -169,10 +153,7 @@ serve(async (req: Request) => {
       mime = r.mime || mime
     }
 
-    const t0 = Date.now()
-
-    // 1) Clasificar
-    const classify = await callGeminiJSON({
+    const classification = await callGeminiJSON({
       apiKey: GEMINI_API_KEY,
       model: GEMINI_MODEL,
       prompt: buildClassifyPrompt(fileName),
@@ -180,169 +161,109 @@ serve(async (req: Request) => {
       mime,
     }) as ClassifyResult
 
-    const detectedType: DocType = (classify?.type === 'FACTURA' ? 'FACTURA' : classify?.type === 'TICKET' ? 'TICKET' : undefined) ??
-      heuristicKindFromFilename(fileName)
+    const docType: DocType = classification?.type === 'FACTURA' ? 'FACTURA' : 'TICKET'
 
-    // 2) Extraer
-    const extract = await callGeminiJSON({
+    const extractionPrompt = docType === 'FACTURA' ? buildInvoiceExtractPrompt() : buildTicketExtractPrompt()
+
+    const extractionRaw = await callGeminiJSON({
       apiKey: GEMINI_API_KEY,
       model: GEMINI_MODEL,
-      prompt: buildExtractPrompt(detectedType),
+      prompt: extractionPrompt,
       base64,
       mime,
-    }) as ExtractResult
+    }) as Record<string, unknown>
 
-    const t1 = Date.now()
+    const extraction: ExtractionOutcome = docType === 'FACTURA'
+      ? { type: 'FACTURA', data: normalizeInvoice(extractionRaw) }
+      : { type: 'TICKET', data: normalizeTicket(extractionRaw) }
 
-    // 3) Normalizar + fallbacks conservadores
-    const normalized = normalizeAI(extract)
+    console.log('[ai-extract-expense] clasificación', classification)
+    console.log('[ai-extract-expense] extracción', extraction)
 
-    // Fallbacks con filename si falta invoice_number
-    if (!normalized.invoice_number) {
-      const fromName = detectInvoiceNumber(fileName)
-      if (detectedType === 'FACTURA' && fromName) normalized.invoice_number = fromName
-    }
-
-    // Tax ID con tolerancia a separadores, sin patrón genérico
-    if (!normalized.tax_id) {
-      const compactText = [extract.raw_text || '', extract.notes || ''].join('\n')
-      const tx = detectTaxId(compactText)
-      if (tx) normalized.tax_id = tx
-    }
-
-    // El tipo viene de la 1ª pasada (clasificación). Nunca lo forzamos por tax_id.
-    normalized.type = detectedType
-    ;(normalized as any).kind = detectedType
-
-    const meta = {
-      reason: classify?.reason || undefined,
-      confidence: typeof classify?.confidence === 'number' ? classify.confidence : undefined,
-      timings: { total_ms: t1 - t0 },
-    }
-
-    // NOTE: log corto para trazabilidad (puedes comentar en prod)
-    console.log('[ai-extract-expense]', { type: normalized.type, reason: meta.reason, invoice_number: normalized.invoice_number })
-
-    return json({ success: true, data: normalized, meta })
+    return json({ success: true, classification, extraction })
   } catch (err: any) {
+    console.error('[ai-extract-expense] error', err)
     return json({ success: false, error: String(err?.message || err) }, { status: 500 })
   }
 })
 
-// ==========================
-// Normalización & heurísticas
-// ==========================
-function normalizeAI(src: ExtractResult) {
-  const vendor = (src.vendor ?? '').toString().trim()
-  const expense_date = toISO(src.expense_date || '')
-  const amount_gross = normalizeNumber(src.amount_gross)
-  const tax_vat = normalizeNumber(src.tax_vat)
-  const amount_net = normalizeNumber(src.amount_net ?? (amount_gross && tax_vat ? amount_gross - tax_vat : undefined))
-  const currency = (src.currency || 'EUR').toString().trim().slice(0, 5)
-  const notes = (src.notes || '').toString()
-  const category_guess = (src.category_guess || '').toString() || undefined
-  const address = optionalStr(src.address)
-  const email = optionalStr(src.email)
-
-  let invoice_number = sanitizeId(optionalStr(src.invoice_number))
-  let tax_id = sanitizeId(optionalStr(src.tax_id))
-
+function normalizeInvoice(raw: Record<string, unknown>): InvoiceExtractResult {
   return {
-    vendor,
-    expense_date,
-    amount_gross: amount_gross ?? 0,
-    tax_vat: tax_vat ?? 0,
-    amount_net: amount_net ?? 0,
-    currency,
-    category_guess,
-    category_suggestion: category_guess,
-    notes,
-    type: 'TICKET' as DocType, // NOTE: se ajusta más arriba con la clasificación
-    invoice_number: invoice_number || undefined,
-    tax_id: tax_id || undefined,
-    address,
-    email,
+    vendor: toStringOrNull(raw.vendor),
+    expense_date: toISO(raw.expense_date),
+    amount_gross: normalizeNumber(raw.amount_gross),
+    tax_vat: normalizeNumber(raw.tax_vat),
+    amount_net: normalizeNumber(raw.amount_net),
+    currency: toCurrency(raw.currency),
+    invoice_number: sanitizeId(toStringOrNull(raw.invoice_number)),
+    seller_tax_id: sanitizeId(toStringOrNull(raw.seller_tax_id)),
+    buyer_tax_id: sanitizeId(toStringOrNull(raw.buyer_tax_id)),
+    tax_id: sanitizeId(toStringOrNull(raw.tax_id)),
+    email: toStringOrNull(raw.email),
+    notes: toStringOrNull(raw.notes),
+    ocr_text: toPlainText(raw.ocr_text),
   }
 }
 
-function optionalStr(v?: string | null) { return v == null ? undefined : String(v) }
-
-function sanitizeId(v?: string) {
-  if (!v) return v
-  return v.trim().replace(/[\s\t]+/g, '')
+function normalizeTicket(raw: Record<string, unknown>): TicketExtractResult {
+  return {
+    vendor: toStringOrNull(raw.vendor),
+    expense_date: toISO(raw.expense_date),
+    amount_total: normalizeNumber(raw.amount_total),
+    tax_vat: normalizeNumber(raw.tax_vat),
+    amount_net: normalizeNumber(raw.amount_net),
+    currency: toCurrency(raw.currency),
+    payment_method: toStringOrNull(raw.payment_method),
+    notes: toStringOrNull(raw.notes),
+    ocr_text: toPlainText(raw.ocr_text),
+  }
 }
 
-function normalizeNumber(n: unknown): number | undefined {
-  if (typeof n === 'number' && isFinite(n)) return n
-  if (typeof n === 'string') {
-    const s = n.replace(/\s/g, '').replace(/,/g, '.')
+function toStringOrNull(value: unknown): string | null {
+  if (value == null) return null
+  const s = String(value).trim()
+  return s.length ? s : null
+}
+
+function toPlainText(value: unknown): string | null {
+  if (value == null) return null
+  if (typeof value === 'string') return value
+  try { return JSON.stringify(value) } catch { return String(value) }
+}
+
+function toCurrency(value: unknown): string | null {
+  const s = toStringOrNull(value)
+  if (!s) return null
+  return s.toUpperCase().slice(0, 5)
+}
+
+function sanitizeId(value: string | null): string | null {
+  if (!value) return null
+  const cleaned = value.replace(/\s+/g, '')
+  return cleaned.length ? cleaned : null
+}
+
+function normalizeNumber(value: unknown): number | null {
+  if (typeof value === 'number' && isFinite(value)) return value
+  if (typeof value === 'string') {
+    const s = value.replace(/\s/g, '').replace(/,/g, '.')
     const f = parseFloat(s)
     if (!isNaN(f)) return f
   }
-  return undefined
+  return null
 }
 
-function toISO(s: string): string {
-  if (!s) return ''
-  // Acepta dd/mm/yyyy ó yyyy-mm-dd
-  const a = s.trim()
-  const m1 = a.match(/^(\d{4})[-/](\d{2})[-/](\d{2})$/)
-  if (m1) return `${m1[1]}-${m1[2]}-${m1[3]}`
-  const m2 = a.match(/^(\d{2})[-/](\d{2})[-/](\d{4})$/)
-  if (m2) return `${m2[3]}-${m2[2]}-${m2[1]}`
-  return ''
+function toISO(value: unknown): string | null {
+  const s = toStringOrNull(value)
+  if (!s) return null
+  const normalized = s.replace(/\./g, '-').replace(/\//g, '-')
+  const iso = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`
+  const eu = normalized.match(/^(\d{2})-(\d{2})-(\d{4})$/)
+  if (eu) return `${eu[3]}-${eu[2]}-${eu[1]}`
+  return null
 }
 
-function detectInvoiceNumber(text?: string): string | undefined {
-  if (!text) return undefined
-  const patterns: RegExp[] = [
-    /factur[a|o]\s*(?:n[ºo°]\s*|n\.?\s*|num(?:ero)?\s*|#|:)?\s*([A-Z0-9][A-Z0-9_.\-\/]{2,24})/i,
-    /invoice\s*(?:no\.?|number|n[ºo°]|#|:)?\s*([A-Z0-9][A-Z0-9_.\-\/]{2,24})/i,
-    /\b(?:n[ºo°]|no\.|n\.)\s*(?:de\s*factura)?\s*[:#-]?\s*([A-Z0-9][A-Z0-9_.\-\/]{3,24})/i,
-    // Del filename, ej: F253282.pdf o FAC-2024-0001.jpg
-    /\b([A-Z]{1,4}-?\d{3,10})\b/i,
-  ]
-  for (const re of patterns) { const m = text.match(re); if (m) return m[1] }
-  return undefined
-}
-
-function detectTaxId(text?: string): string | undefined {
-  if (!text) return undefined
-  // Permite separadores; sin fallback genérico para evitar falsos positivos
-  const rawPatterns: RegExp[] = [
-    /\b([ABCDEFGHJKLMNPQRSUVW]\s?[.\-\s]?\d{7}\s?[.\-\s]?[A-Z0-9])\b/i, // CIF ES
-    /\b(\d{8}\s?[.\-\s]?[A-Z])\b/i,                                      // NIF ES
-    /\b([XYZ]\s?[.\-\s]?\d{7}\s?[.\-\s]?[A-Z])\b/i,                     // NIE ES
-    /\b([A-Z]{2}\s?[.\-\s]?[A-Z0-9]{8,12})\b/i,                            // VAT UE
-    /\b([A-Z&Ñ]{3,4}\s?[.\-\s]?[0-9]{6}\s?[.\-\s]?[A-Z0-9]{3})\b/i,     // RFC MX
-    /\b(\d{1,3}\.\d{3}\.\d{3}-[\dkK])\b/,                               // RUT CL
-    /\b(\d{2}-?\d{8}-?\d)\b/,                                             // CUIT AR
-  ]
-  for (const re of rawPatterns) { const m = text.match(re); if (m) return m[1].replace(/[\s.\-]/g, '') }
-
-  const sanitized = text.replace(/[\s.\-]/g, '')
-  const cleanPatterns: RegExp[] = [
-    /\b([ABCDEFGHJKLMNPQRSUVW]\d{7}[A-Z0-9])\b/i,
-    /\b(\d{8}[A-Z])\b/i,
-    /\b([XYZ]\d{7}[A-Z])\b/i,
-    /\b([A-Z]{2}[A-Z0-9]{8,12})\b/i,
-    /\b([A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3})\b/i,
-    /\b(\d{2}\d{8}\d)\b/,
-  ]
-  for (const re of cleanPatterns) { const m = sanitized.match(re); if (m) return m[1] }
-  return undefined
-}
-
-function heuristicKindFromFilename(name: string): DocType {
-  const lower = name.toLowerCase()
-  if (/factura\s+simplificada|simplified\s+invoice/.test(lower)) return 'TICKET'
-  if (/invoice|factura|fac-\d|f\d{3,}/.test(lower)) return 'FACTURA'
-  return 'TICKET'
-}
-
-// ==========================
-// IO helpers
-// ==========================
 async function fileToBase64(file: File): Promise<{ base64: string; mime: string }> {
   const buf = new Uint8Array(await file.arrayBuffer())
   return { base64: encodeBase64(buf), mime: file.type || 'application/octet-stream' }
@@ -366,10 +287,9 @@ function encodeBase64(bytes: Uint8Array): string {
   return btoa(binary)
 }
 
-function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)) }
+function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)) }
 
 function safeJsonParseFromText(text: string) {
-  // Intenta extraer el primer bloque JSON válido
   const start = text.indexOf('{')
   const end = text.lastIndexOf('}')
   if (start === -1 || end === -1 || end <= start) return null

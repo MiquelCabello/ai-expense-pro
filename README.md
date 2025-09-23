@@ -97,6 +97,7 @@ The application uses Supabase PostgreSQL with the following main tables:
 - Content Security Policy (CSP)
 - File type validation for uploads
 - Rate limiting configurations
+- Supabase hardening runbook: see docs/security/supabase-hardening.md
 
 ## Testing
 

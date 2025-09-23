@@ -1,6 +1,9 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 type Theme = "dark" | "light" | "system";
+
+const isTheme = (value: unknown): value is Theme =>
+  value === "dark" || value === "light" || value === "system";
 
 type ThemeProviderProps = {
   children: React.ReactNode;
@@ -26,11 +29,30 @@ export function ThemeProvider({
   storageKey = "expensepro-ui-theme",
   ...props
 }: ThemeProviderProps) {
-  const [theme, setTheme] = useState<Theme>(
-    () => (localStorage.getItem(storageKey) as Theme) || defaultTheme
+  const [theme, setThemeState] = useState<Theme>(() => {
+    if (typeof window === "undefined") {
+      return defaultTheme;
+    }
+
+    const storedTheme = window.localStorage.getItem(storageKey);
+    return isTheme(storedTheme) ? storedTheme : defaultTheme;
+  });
+
+  const setTheme = useCallback(
+    (newTheme: Theme) => {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(storageKey, newTheme);
+      }
+      setThemeState(newTheme);
+    },
+    [storageKey],
   );
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
     const root = window.document.documentElement;
 
     root.classList.remove("light", "dark");
@@ -48,13 +70,7 @@ export function ThemeProvider({
     root.classList.add(theme);
   }, [theme]);
 
-  const value = {
-    theme,
-    setTheme: (theme: Theme) => {
-      localStorage.setItem(storageKey, theme);
-      setTheme(theme);
-    },
-  };
+  const value = useMemo(() => ({ theme, setTheme }), [theme, setTheme]);
 
   return (
     <ThemeProviderContext.Provider {...props} value={value}>

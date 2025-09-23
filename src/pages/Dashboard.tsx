@@ -1,5 +1,5 @@
 // ...existing code...
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -29,111 +29,148 @@ interface DashboardStats {
   recentExpenses: any[];
 }
 
+const DEFAULT_DASHBOARD_STATS: DashboardStats = {
+  totalExpenses: 0,
+  pendingExpenses: 0,
+  pendingCount: 0,
+  topCategory: '-',
+  dailyAverage: 0,
+  recentExpenses: [],
+};
+
 export default function Dashboard() {
-  const { profile, signOut } = useAuth();
-  const [stats, setStats] = useState<DashboardStats>({
-    totalExpenses: 0,
-    pendingExpenses: 0,
-    pendingCount: 0,
-    topCategory: '-',
-    dailyAverage: 0,
-    recentExpenses: []
-  });
+  const { profile, account, isMaster } = useAuth();
+  const planNameMap: Record<'FREE' | 'PROFESSIONAL' | 'ENTERPRISE', string> = {
+    FREE: 'Starter',
+    PROFESSIONAL: 'Professional',
+    ENTERPRISE: 'Enterprise',
+  };
+  const planConfig: Record<'FREE' | 'PROFESSIONAL' | 'ENTERPRISE', { monthlyLimit: number | null }> = {
+    FREE: { monthlyLimit: 50 },
+    PROFESSIONAL: { monthlyLimit: null },
+    ENTERPRISE: { monthlyLimit: null },
+  };
+  const planKey = (account?.plan ?? 'FREE') as 'FREE' | 'PROFESSIONAL' | 'ENTERPRISE';
+  const resolvedAccountId = !isMaster ? (profile?.account_id ?? account?.id ?? undefined) : undefined;
+  const [stats, setStats] = useState<DashboardStats>(DEFAULT_DASHBOARD_STATS);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (profile) {
-      fetchDashboardStats();
-    }
-  }, [profile]);
+  const planName = isMaster ? 'Master' : planNameMap[planKey];
+  const monthlyLimit = isMaster ? null : account?.monthly_expense_limit ?? planConfig[planKey].monthlyLimit;
 
-  const fetchDashboardStats = async () => {
+  const fetchDashboardStats = useCallback(async () => {
+    if (!profile && !isMaster) {
+      setStats(DEFAULT_DASHBOARD_STATS);
+      setLoading(false);
+      return;
+    }
+
+    if (!isMaster) {
+      if (!profile) {
+        setStats(DEFAULT_DASHBOARD_STATS);
+        setLoading(false);
+        return;
+      }
+      if (!resolvedAccountId) {
+        console.warn('[Dashboard] Missing account_id for non-master user', profile?.id);
+        setStats(DEFAULT_DASHBOARD_STATS);
+        setLoading(false);
+        return;
+      }
+    }
+
     try {
       setLoading(true);
-      
-      // Get expenses based on user role
+
       let expenseQuery = supabase
         .from('expenses')
-        // Removed direct 'profiles(name)' join to avoid errors if relationship not defined.
-        // We'll fetch profiles separately and attach them to expenses (read-only).
         .select(`
           *,
           categories(name)
         `);
 
-      // If employee, only show their expenses
-      if (profile?.role === 'EMPLOYEE') {
+      if (!isMaster && resolvedAccountId) {
+        expenseQuery = expenseQuery.eq('account_id', resolvedAccountId);
+      }
+
+      if (!isMaster && profile?.role === 'EMPLOYEE') {
         expenseQuery = expenseQuery.eq('employee_id', profile.user_id);
       }
 
-      const { data: expenses } = await expenseQuery;
-      if (!expenses) {
-        setStats(s => ({ ...s, recentExpenses: [] }));
-        return;
+      const { data: expenses, error } = await expenseQuery;
+      if (error) {
+        throw error;
       }
 
-      // Fetch profiles for employee_ids present in the expenses (only if needed)
-      const employeeIds = Array.from(new Set(expenses.map((e: any) => e.employee_id).filter(Boolean)));
+      const resolvedExpenses = expenses ?? [];
+
+      const employeeIds = Array.from(new Set(resolvedExpenses.map((e: any) => e.employee_id).filter(Boolean)));
       let profilesMap: Record<string, any> = {};
+
       if (employeeIds.length > 0) {
-        const { data: profiles } = await supabase
-          .from('profiles')
-          .select('user_id, name')
-          .in('user_id', employeeIds);
-        if (profiles && profiles.length > 0) {
-          profilesMap = Object.fromEntries(profiles.map((p: any) => [p.user_id, p]));
+        try {
+          let profileQuery = supabase
+            .from('profiles')
+            .select('user_id, name')
+            .in('user_id', employeeIds);
+
+          if (!isMaster && resolvedAccountId) {
+            profileQuery = profileQuery.eq('account_id', resolvedAccountId);
+          }
+
+          const { data: employeeProfiles, error: profilesError } = await profileQuery;
+
+          if (!profilesError && employeeProfiles?.length) {
+            profilesMap = Object.fromEntries(employeeProfiles.map((p: any) => [p.user_id, p]));
+          }
+        } catch (profilesErr) {
+          console.warn('[Dashboard] Unable to load employee names', profilesErr);
         }
       }
 
-      // Attach profiles info to expenses for backwards compatibility with UI
-      const expensesWithProfiles = expenses.map((exp: any) => ({
+      const expensesWithProfiles = resolvedExpenses.map((exp: any) => ({
         ...exp,
-        profiles: profilesMap[exp.employee_id] || null
+        profiles: profilesMap[exp.employee_id] || null,
       }));
 
-      // Calculate stats
       const total = expensesWithProfiles.reduce((sum: number, exp: any) => {
         const amount = typeof exp.amount_gross === 'string' ? parseFloat(exp.amount_gross) : exp.amount_gross;
-        return sum + (isNaN(amount) ? 0 : amount);
+        return sum + (Number.isNaN(amount) ? 0 : amount);
       }, 0);
-      
+
       const pending = expensesWithProfiles
         .filter((exp: any) => exp.status === 'PENDING')
         .reduce((sum: number, exp: any) => {
           const amount = typeof exp.amount_gross === 'string' ? parseFloat(exp.amount_gross) : exp.amount_gross;
-          return sum + (isNaN(amount) ? 0 : amount);
+          return sum + (Number.isNaN(amount) ? 0 : amount);
         }, 0);
-        
+
       const pendingCount = expensesWithProfiles.filter((exp: any) => exp.status === 'PENDING').length;
-      
-      // Get top category
+
       const categoryTotals = expensesWithProfiles.reduce((acc: Record<string, number>, exp: any) => {
         const category = exp.categories?.name || 'Otros';
         const amount = typeof exp.amount_gross === 'string' ? parseFloat(exp.amount_gross) : exp.amount_gross;
-        const validAmount = isNaN(amount) ? 0 : amount;
+        const validAmount = Number.isNaN(amount) ? 0 : amount;
         acc[category] = (acc[category] || 0) + validAmount;
         return acc;
-      }, {});
-      
-      const topCategory = Object.keys(categoryTotals).length > 0 
-        ? Object.entries(categoryTotals).sort(([,a], [,b]) => (b as number) - (a as number))[0][0]
+      }, {} as Record<string, number>);
+
+      const topCategory = Object.keys(categoryTotals).length > 0
+        ? Object.entries(categoryTotals).sort(([, a], [, b]) => (b as number) - (a as number))[0][0]
         : '-';
 
-      // Daily average (last 30 days)
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      const recentExpenses = expensesWithProfiles.filter((exp: any) => 
-        new Date(exp.expense_date) >= thirtyDaysAgo
-      );
-      const dailyAverage = recentExpenses.length > 0 
+      const recentExpenses = expensesWithProfiles.filter((exp: any) => new Date(exp.expense_date) >= thirtyDaysAgo);
+      const dailyAverage = recentExpenses.length > 0
         ? recentExpenses.reduce((sum: number, exp: any) => {
             const amount = typeof exp.amount_gross === 'string' ? parseFloat(exp.amount_gross) : exp.amount_gross;
-            return sum + (isNaN(amount) ? 0 : amount);
+            return sum + (Number.isNaN(amount) ? 0 : amount);
           }, 0) / 30
         : 0;
 
-      // Recent expenses (last 5)
       const recent = expensesWithProfiles
+        .slice()
         .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
         .slice(0, 5);
 
@@ -143,14 +180,25 @@ export default function Dashboard() {
         pendingCount,
         topCategory,
         dailyAverage,
-        recentExpenses: recent
+        recentExpenses: recent,
       });
     } catch (error) {
+      console.error('[Dashboard] Stats error', error);
       toast.error('Error cargando estadísticas');
+      setStats(DEFAULT_DASHBOARD_STATS);
     } finally {
       setLoading(false);
     }
-  };
+  }, [resolvedAccountId, profile, isMaster]);
+
+  useEffect(() => {
+    if (!profile && !isMaster) {
+      setStats(DEFAULT_DASHBOARD_STATS);
+      setLoading(false);
+      return;
+    }
+    void fetchDashboardStats();
+  }, [fetchDashboardStats, profile, isMaster]);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('es-ES', {
@@ -197,6 +245,14 @@ export default function Dashboard() {
           <p className="text-muted-foreground">
             Resumen de gastos y actividad reciente
           </p>
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+            <span className="font-medium">Plan {planName}</span>
+            {typeof monthlyLimit === 'number' ? (
+              <span>Límite mensual: {monthlyLimit} gastos</span>
+            ) : (
+              <span>Gastos ilimitados</span>
+            )}
+          </div>
         </div>
 
         {/* Stats Cards */}

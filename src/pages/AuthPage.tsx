@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { supabase } from '@/integrations/supabase/client';
@@ -14,6 +15,8 @@ export default function AuthPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [companyName, setCompanyName] = useState('');
+  const [plan, setPlan] = useState<'FREE' | 'PROFESSIONAL' | 'ENTERPRISE'>('FREE');
   const navigate = useNavigate();
 
   const handleSignUp = async (e: React.FormEvent) => {
@@ -30,6 +33,8 @@ export default function AuthPage() {
           emailRedirectTo: redirectUrl,
           data: {
             name: name,
+            company_name: companyName,
+            plan,
             role: 'ADMIN' // Set default role to ADMIN
           }
         }
@@ -171,6 +176,32 @@ export default function AuthPage() {
                         required
                       />
                     </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="company">Nombre de la Empresa</Label>
+                    <Input
+                      id="company"
+                      type="text"
+                      placeholder="Tu empresa"
+                      value={companyName}
+                      onChange={(e) => setCompanyName(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="plan">Plan</Label>
+                    <Select value={plan} onValueChange={(value) => setPlan(value as 'FREE' | 'PROFESSIONAL' | 'ENTERPRISE')}>
+                      <SelectTrigger id="plan">
+                        <SelectValue placeholder="Selecciona un plan" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="FREE">Starter · Hasta 50 gastos/mes</SelectItem>
+                        <SelectItem value="PROFESSIONAL">Professional · 25 usuarios</SelectItem>
+                        <SelectItem value="ENTERPRISE">Enterprise · Ilimitado</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   <div className="space-y-2">

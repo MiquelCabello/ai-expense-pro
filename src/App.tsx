@@ -8,6 +8,8 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import LandingPage from "./pages/LandingPage";
 import AuthPage from "./pages/AuthPage";
 import RegistrationConfirmationPage from "./pages/RegistrationConfirmationPage";
+import AcceptInvitePage from "./pages/AcceptInvitePage";
+import CompanyProfilePage from "./pages/CompanyProfilePage";
 import Dashboard from "./pages/Dashboard";
 import ExpensesPage from "./pages/ExpensesPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
@@ -69,7 +71,7 @@ const App = () => (
         <AuthProvider>
           <Toaster />
           <Sonner />
-          <BrowserRouter>
+          <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
             <Routes>
               <Route path="/" element={
                 <PublicRoute>
@@ -82,6 +84,12 @@ const App = () => (
                 </PublicRoute>
               } />
               <Route path="/registro-confirmacion" element={<RegistrationConfirmationPage />} />
+              <Route path="/accept-invite" element={<AcceptInvitePage />} />
+              <Route path="/empresa" element={
+                <ProtectedRoute>
+                  <CompanyProfilePage />
+                </ProtectedRoute>
+              } />
               <Route path="/dashboard" element={
                 <ProtectedRoute>
                   <Dashboard />

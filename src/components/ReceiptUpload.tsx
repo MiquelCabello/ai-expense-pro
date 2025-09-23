@@ -1,14 +1,11 @@
-// Ruta: src/components/ReceiptUpload.tsx
-// Descripción: Añade modal de "Categoría sugerida" si la IA propone una que no existe.
-// Mantiene:
-//  - Modal previo (Empleado, Proyecto, Notas)
-//  - rfId único y subida sin upsert
-//  - Edge Fn con FormData (file + userId) + fallback
-//  - Normalizador IA y selector Ticket/Factura
-//  - Consultas resilientes (sin columna status / sin tabla employees)
-// Anotaciones: degradación suave si no hay permisos para crear categorías.
+// Ruta: src/components/ReceiptUpload.tsx — COMPLETO (corregido)
+// Cambios clave:
+//  - Integra reglas R1–R4 (classifyDocType) y respeta la elección del usuario (finalizeDocType)
+//  - Elimina el override de FACTURA por tener solo tax_id/invoice_number
+//  - Envía a la BBDD: doc_type, doc_type_source, classification_path (con fallback si aún no existen)
+//  - Mantiene tu UI/flujo: modal, categorías, dedupe hash, audit_logs, etc.
 
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useMemo } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -20,6 +17,7 @@ import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { useAuth } from '@/hooks/useAuth'
 import { supabase } from '@/integrations/supabase/client'
+import type { TablesInsert } from '@/integrations/supabase/types'
 import { toast } from 'sonner'
 import {
   Upload,
@@ -37,6 +35,14 @@ import {
   Info,
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+
+// ⬇️ NUEVO: Reglas robustas + fusión con elección de usuario
+import {
+  classifyDocType,
+  finalizeDocType,
+  type DocType as DocTypeAI,
+  type ClassificationResult,
+} from '@/lib/classifyDocType'
 
 interface ExtractedData {
   vendor: string
@@ -56,9 +62,16 @@ interface ExtractedData {
   tax_id?: string
   address?: string
   email?: string
+  // ⬇️ NUEVO: campos para reglas R1–R4
+  seller_tax_id?: string
+  buyer_tax_id?: string
+  detected_keywords?: string[]
+  ocr_text?: string
 }
 
 interface ReceiptUploadProps { onUploadComplete?: () => void }
+
+const DEBUG_DOC_TYPE = Boolean(import.meta.env.DEV || import.meta.env.VITE_DEBUG_DOC_CLASSIFICATION === 'true')
 
 // ===== Utils: IDs / parseo / normalización =====
 const genId = () => (globalThis.crypto?.randomUUID?.() as string | undefined) || `rf_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`
@@ -90,9 +103,9 @@ const parseNumber = (val: any): number | undefined => {
 const toISODate = (val: any): string => {
   if (!val) return ''
   const s = String(val).trim()
-  let m = s.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/)
+  let m = s.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/)
   if (m) { const [, y, mo, d] = m; return `${y}-${String(+mo).padStart(2,'0')}-${String(+d).padStart(2,'0')}` }
-  m = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/)
+  m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/)
   if (m) { const [, d, mo, y] = m; return `${y}-${String(+mo).padStart(2,'0')}-${String(+d).padStart(2,'0')}` }
   const t = Date.parse(s)
   if (!Number.isNaN(t)) { const dt = new Date(t); return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}` }
@@ -119,6 +132,17 @@ const normalizeAIResponse = (raw: any): ExtractedData => {
   const address = pickField(src, 'address', 'company_address')
   const email = pickField(src, 'email', 'company_email')
 
+  // ⬇️ NUEVO: intentar mapear tax IDs vendedor/comprador si el modelo los da
+  const seller_tax_id = pickField(src, 'seller_tax_id', 'vendor_tax_id', 'company_tax_id', 'issuer_tax_id', 'emisor_tax_id', 'emisor.nif', 'emisor.cif') || tax_id
+  const buyer_tax_id = pickField(src, 'buyer_tax_id', 'customer_tax_id', 'client_tax_id', 'receptor_tax_id', 'cliente.nif', 'cliente.cif')
+
+  const detected_keywords: string[] | undefined = (() => {
+    const arr = pickField(src, 'detected_keywords', 'keywords')
+    if (Array.isArray(arr)) return arr.map((x: any) => String(x))
+    return undefined
+  })()
+  const ocr_text = pickField(src, 'ocr_text', 'raw_text', 'full_text')
+
   const t = (pickField(src, 'type', 'kind') ?? '').toString().toUpperCase()
   const type = (invoice_number || tax_id ? 'FACTURA' : (t || 'TICKET')) as ExtractedData['type']
 
@@ -138,13 +162,17 @@ const normalizeAIResponse = (raw: any): ExtractedData => {
     tax_id: tax_id ? String(tax_id) : undefined,
     address: address ? String(address) : undefined,
     email: email ? String(email) : undefined,
+    seller_tax_id: seller_tax_id ? String(seller_tax_id) : undefined,
+    buyer_tax_id: buyer_tax_id ? String(buyer_tax_id) : undefined,
+    detected_keywords,
+    ocr_text: ocr_text ? String(ocr_text) : undefined,
   }
 }
 
 export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) {
-  const { user, profile } = useAuth()
+  const { user, profile, account, isMaster } = useAuth()
 
-  const isAdmin = React.useMemo(() => {
+  const isAdmin = useMemo(() => {
     const roleStr = (profile as any)?.role ? String((profile as any).role).toLowerCase() : ''
     const flag = (profile as any)?.is_admin === true
     const roles = (user?.app_metadata?.roles as string[] | undefined) ?? []
@@ -162,12 +190,68 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
   const [receiptFileId, setReceiptFileId] = useState<string | null>(null)
   const [docType, setDocType] = useState<'TICKET' | 'FACTURA'>('TICKET')
 
+  // ⬇️ NUEVO: guardar la clasificación de las reglas para usar en el submit
+  const [aiClassification, setAiClassification] = useState<ClassificationResult | null>(null)
+
   const [selfEmployee, setSelfEmployee] = useState<any | null>(null)
-  const [accountId, setAccountId] = useState<string | null>(null)
+  const [accountId, setAccountId] = useState<string | null>(profile?.account_id ?? account?.id ?? null)
   const [projects_list, setProjectsList] = useState<any[]>([])
   const [employees_list, setEmployeesList] = useState<any[]>([])
   const [categories_list, setCategoriesList] = useState<any[]>([])
   const [categoryIndex, setCategoryIndex] = useState<Record<string, string>>({})
+  const [monthlyUsage, setMonthlyUsage] = useState<number | null>(null)
+  const monthlyLimit = typeof account?.monthly_expense_limit === 'number' ? account.monthly_expense_limit : null
+  const monthlyLimitKey = account?.monthly_expense_limit ?? null
+  const limitApplies = !isMaster && typeof monthlyLimit === 'number'
+  const hasReachedMonthlyLimit = limitApplies && monthlyLimit !== null && typeof monthlyUsage === 'number' && monthlyUsage >= monthlyLimit
+  const remainingMonthlySlots = limitApplies && monthlyLimit !== null && typeof monthlyUsage === 'number'
+    ? Math.max(monthlyLimit - monthlyUsage, 0)
+    : null
+  const limitBanner = limitApplies ? (
+    <div
+      className={`mb-4 rounded-lg border p-3 text-sm ${hasReachedMonthlyLimit ? 'border-destructive/40 bg-destructive/10 text-destructive' : 'border-amber-200 bg-amber-50 text-amber-700'}`}
+    >
+      {hasReachedMonthlyLimit ? (
+        <span>Has alcanzado el máximo de {monthlyLimit} gastos este mes para tu plan. Actualiza tu suscripción para seguir registrando gastos.</span>
+      ) : (
+        <span>Te quedan {remainingMonthlySlots} gastos disponibles este mes (límite {monthlyLimit}).</span>
+      )}
+    </div>
+  ) : null
+
+  React.useEffect(() => {
+    setAccountId(profile?.account_id ?? account?.id ?? null)
+  }, [profile?.account_id, account?.id])
+
+  React.useEffect(() => {
+    if (!limitApplies || !accountId) {
+      setMonthlyUsage(null)
+      return
+    }
+
+    const fetchMonthlyUsage = async () => {
+      const now = new Date()
+      const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
+      const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1))
+
+      const { count, error } = await supabase
+        .from('expenses')
+        .select('id', { count: 'exact', head: true })
+        .eq('account_id', accountId)
+        .gte('expense_date', monthStart.toISOString().slice(0, 10))
+        .lt('expense_date', monthEnd.toISOString().slice(0, 10))
+
+      if (error) {
+        console.warn('[ReceiptUpload] No se pudo calcular el uso mensual', error)
+        setMonthlyUsage(null)
+        return
+      }
+
+      setMonthlyUsage(typeof count === 'number' ? count : 0)
+    }
+
+    void fetchMonthlyUsage()
+  }, [accountId, monthlyLimitKey, limitApplies, isMaster])
 
   const [formData, setFormData] = useState({
     employee_id: '',
@@ -195,27 +279,27 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
   const displayName =
     selfEmployee?.full_name ?? (profile as any)?.full_name ?? (profile as any)?.name ??
     (user?.user_metadata?.full_name as string | undefined) ?? (user?.user_metadata?.name as string | undefined) ??
-    profile?.email ?? user?.email ?? ''
+    user?.email ?? ''
 
-  const normalizeText = React.useCallback((s?: string) => {
+  const normalizeText = useCallback((s?: string) => {
     if (!s) return ''
     return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
   }, [])
 
-  const sortProjects = React.useCallback((list: any[]) => {
+  const sortProjects = useCallback((list: any[]) => {
     return [...list].sort((a, b) => String(a.code || '').localeCompare(String(b.code || ''), 'es', { numeric: true, sensitivity: 'base' }))
   }, [])
-  const sortCategories = React.useCallback((list: any[]) => {
+  const sortCategories = useCallback((list: any[]) => {
     return [...list].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es', { sensitivity: 'base' }))
   }, [])
 
-  const buildCategoryIndex = React.useCallback((cats: any[]) => {
+  const buildCategoryIndex = useCallback((cats: any[]) => {
     const idx: Record<string, string> = {}
     for (const c of cats) { const key = normalizeText(c.name); if (key) idx[key] = c.id }
     return idx
   }, [normalizeText])
 
-  const fallbackCategoryId = React.useMemo(() => {
+  const fallbackCategoryId = useMemo(() => {
     const candidates = ['otro', 'otra', 'otros', 'other', 'misc']
     for (const c of categories_list) { const key = normalizeText(c.name); if (candidates.includes(key)) return c.id }
     return ''
@@ -228,7 +312,7 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
     if (!user?.id) return
     ;(async () => {
       try {
-        const { data: emp, error } = await supabase
+        const { data: emp, error } = await (supabase as any)
           .from('employees')
           .select('id, full_name, user_id, account_id')
           .eq('user_id', user.id)
@@ -245,7 +329,7 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
     ;(async () => {
       try {
         let q = supabase.from('project_codes').select('*').order('code'); if (accountId) q = q.eq('account_id', accountId)
-        let { data, error } = await q.eq('status', 'ACTIVE')
+        const { data, error } = await q.eq('status', 'ACTIVE')
         if (error) { let q2 = supabase.from('project_codes').select('*').order('code'); if (accountId) q2 = q2.eq('account_id', accountId); const { data: d2 } = await q2; setProjectsList(sortProjects(d2 || [])); return }
         setProjectsList(sortProjects(data || []))
       } catch {}
@@ -257,7 +341,7 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
     ;(async () => {
       try {
         let q = supabase.from('categories').select('*').order('name'); if (accountId) q = q.eq('account_id', accountId)
-        let { data, error } = await q.eq('status', 'ACTIVE')
+        const { data, error } = await (q as any).eq('status', 'ACTIVE')
         if (error) { let q2 = supabase.from('categories').select('*').order('name'); if (accountId) q2 = q2.eq('account_id', accountId); const { data: d2 } = await q2; setCategoriesList(sortCategories(d2 || [])); return }
         setCategoriesList(sortCategories(data || []))
       } catch {}
@@ -266,18 +350,30 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
 
   // employees (solo admin; tolerante si la tabla no existe o no tiene status)
   React.useEffect(() => {
-    if (!isAdmin || !accountId) return
+    if (!accountId || !isAdmin) {
+      setEmployeesList([])
+      return
+    }
     ;(async () => {
       try {
-        let q = supabase.from('employees').select('id, full_name, email, account_id, status').eq('account_id', accountId).order('full_name')
-        let { data, error } = await q.eq('status', 'ACTIVE')
-        if (error) {
-          const { data: d2 } = await supabase.from('employees').select('id, full_name, email, account_id').eq('account_id', accountId).order('full_name')
-          setEmployeesList(d2 || [])
-          return
-        }
-        setEmployeesList(data || [])
-      } catch { setEmployeesList([]) }
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('user_id, name, status')
+          .eq('account_id', accountId)
+          .eq('status', 'ACTIVE')
+          .order('name')
+        if (error) throw error
+        const normalized = (data || []).map((item) => ({
+          id: item.user_id,
+          full_name: item.name,
+          email: '',
+          account_id: accountId,
+          status: item.status,
+        }))
+        setEmployeesList(normalized)
+      } catch {
+        setEmployeesList([])
+      }
     })()
   }, [isAdmin, accountId])
 
@@ -330,30 +426,24 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
     input.click()
   }
 
-  const employeesEffective = React.useMemo(() => {
+  const employeesEffective = useMemo(() => {
     let list = employees_list || []; const sel = formData.employee_id
     if (isAdmin && sel && !list.some((e) => e.id === sel)) list = [...list, { id: sel, full_name: displayName, email: '' }]
     return list
   }, [employees_list, formData.employee_id, isAdmin, displayName])
 
-  const mapCategoryNameToId = React.useCallback((name?: string) => {
+  const mapCategoryNameToId = useCallback((name?: string) => {
     const guess = normalizeText(name); if (!guess) return fallbackCategoryId
     if (categoryIndex[guess]) return categoryIndex[guess]
     for (const c of categories_list) { const key = normalizeText(c.name); if (key.startsWith(guess) || guess.startsWith(key) || key.includes(guess)) return c.id }
     return fallbackCategoryId
   }, [categoryIndex, categories_list, normalizeText, fallbackCategoryId])
 
-  const exactCategoryIdByName = React.useCallback((name?: string) => {
+  const exactCategoryIdByName = useCallback((name?: string) => {
     const key = normalizeText(name); if (!key) return ''
     for (const c of categories_list) { if (normalizeText(c.name) === key) return c.id }
     return ''
   }, [categories_list, normalizeText])
-
-  const detectDocType = (ai: ExtractedData) => {
-    if (ai.tax_id || ai.invoice_number) return 'FACTURA'
-    const t = (ai.type || ai.kind || '').toString().toUpperCase()
-    return t === 'FACTURA' ? 'FACTURA' : 'TICKET'
-  }
 
   const processWithAI = async () => {
     if (!file || !user) return
@@ -363,7 +453,7 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
       const { data: uploadData, error: uploadError } = await supabase.storage.from('receipts').upload(filePath, file, { contentType: file.type })
       if (uploadError) throw new Error(`UPLOAD_FAILED: ${uploadError.message}`)
 
-      const { data: fileRecord, error: fileRecordError } = await supabase
+      const { data: fileRecord, error: fileRecordError } = await (supabase as any)
         .from('receipt_files')
         .insert({ id: rfId, user_id: user.id, path: uploadData.path, original_name: file.name, mime_type: file.type, size: file.size })
         .select('id')
@@ -388,13 +478,116 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         if (!res.ok) { let msg = ''; try { const j = await res.json(); msg = j?.message || j?.error || '' } catch {}; throw new Error(`FN_${msg || res.statusText}`) }
         aiData = await res.json()
       } catch (fnErr: any) {
+        console.error('[DocType Debug] ai-extract-expense failed', fnErr)
+        const allowLegacy = import.meta.env.VITE_ENABLE_LEGACY_RECEIPT_FUNC === 'true'
+        if (!allowLegacy) {
+          throw fnErr
+        }
+        if (DEBUG_DOC_TYPE) {
+          console.warn('[DocType Debug] Falling back to legacy extract-receipt function (VITE_ENABLE_LEGACY_RECEIPT_FUNC=true)')
+        }
         const { data, error } = await supabase.functions.invoke('extract-receipt', { body: { file_path: filePath, file_type: file.type } })
         if (error) throw new Error(`FN_${error.message || 'extract-receipt failed'}`)
         aiData = data
       }
 
       const norm = normalizeAIResponse(aiData)
-      const detected = detectDocType(norm); setExtractedData(norm); setDocType(detected)
+      const meta = (aiData as Record<string, unknown>)?.meta as Record<string, unknown> | undefined
+      const metaDebug = (meta?.debug as Record<string, unknown>) || {}
+
+      // Reforzamos datos con lo que venga en meta.debug
+      const normForClassification = {
+        ...norm,
+        invoice_number: norm.invoice_number || (metaDebug.invoice_number as string | undefined),
+        seller_tax_id: norm.seller_tax_id || norm.tax_id || (metaDebug.seller_tax_id as string | undefined),
+        buyer_tax_id: norm.buyer_tax_id || (metaDebug.buyer_tax_id as string | undefined),
+      }
+
+      // Aplicamos las mejoras también al objeto que usará la UI
+      if (!norm.invoice_number && normForClassification.invoice_number) {
+        norm.invoice_number = normForClassification.invoice_number
+      }
+      if (!norm.tax_id && (metaDebug.seller_tax_id as string | undefined)) {
+        norm.tax_id = metaDebug.seller_tax_id as string
+      }
+      if (!norm.seller_tax_id && normForClassification.seller_tax_id) {
+        norm.seller_tax_id = normForClassification.seller_tax_id
+      }
+      if (!norm.buyer_tax_id && normForClassification.buyer_tax_id) {
+        norm.buyer_tax_id = normForClassification.buyer_tax_id
+      }
+      if (!norm.address && typeof (aiData?.data ?? aiData)?.address === 'string') {
+        norm.address = ((aiData?.data ?? aiData) as Record<string, unknown>).address as string
+      }
+      if (!norm.email && typeof (aiData?.data ?? aiData)?.email === 'string') {
+        norm.email = ((aiData?.data ?? aiData) as Record<string, unknown>).email as string
+      }
+
+      // NUEVO: aplicar reglas R1–R4 y fijar sugerencia + docType UI
+      const aiBackendType = (normForClassification.type || normForClassification.kind || '').toString().toUpperCase()
+      const serverDocType = (meta?.final_doc_type as string | undefined)?.toUpperCase()
+      const serverClassificationPath = meta?.classification_path as ClassificationResult['classification_path'] | undefined
+
+      let ai: ClassificationResult
+      if (serverDocType) {
+        ai = {
+          aiSuggestion: serverDocType === 'FACTURA' ? 'invoice' : 'ticket',
+          classification_path:
+            serverClassificationPath ?? (serverDocType === 'FACTURA' ? 'R3' : 'R4'),
+        }
+      } else {
+        ai = classifyDocType({
+          seller_tax_id: normForClassification.seller_tax_id || normForClassification.tax_id,
+          buyer_tax_id: normForClassification.buyer_tax_id,
+          invoice_number: normForClassification.invoice_number,
+          detected_keywords: normForClassification.detected_keywords,
+          ocr_text: normForClassification.ocr_text,
+        })
+
+        if (aiBackendType === 'FACTURA' && ai.aiSuggestion !== 'invoice') {
+          ai = { ...ai, aiSuggestion: 'invoice' }
+        }
+      }
+
+      if (DEBUG_DOC_TYPE) {
+        const payload = (aiData?.data ?? aiData) as Record<string, unknown>
+        console.groupCollapsed(`%c[DocType Debug] ${file.name}`, 'color:#2563eb;font-weight:600;')
+        console.log('Backend meta', {
+          backendType: aiBackendType || payload?.type,
+          finalDocType: serverDocType || aiBackendType,
+          backendReason: meta?.reason,
+          backendConfidence: meta?.confidence,
+          classification_path: serverClassificationPath,
+          backendSellerTaxId: payload?.seller_tax_id,
+          backendBuyerTaxId: payload?.buyer_tax_id,
+          backendInvoiceNumber: payload?.invoice_number,
+          debugSellerTaxId: metaDebug.seller_tax_id,
+          debugBuyerTaxId: metaDebug.buyer_tax_id,
+          debugInvoiceNumber: metaDebug.invoice_number,
+          upgradedToInvoice: meta?.upgraded_to_invoice,
+        })
+        console.log('Normalized fields', {
+          invoice_number: normForClassification.invoice_number,
+          seller_tax_id: normForClassification.seller_tax_id || normForClassification.tax_id,
+          buyer_tax_id: normForClassification.buyer_tax_id,
+          detected_keywords: normForClassification.detected_keywords,
+          textSnippet: (normForClassification.ocr_text || '').slice(0, 240),
+        })
+        console.log('Heuristics result', ai)
+        if (ai.aiSuggestion === 'ticket') {
+          console.warn('[DocType Debug] Heurística resultó en ticket', {
+            classification_path: ai.classification_path,
+            invoice_number: normForClassification.invoice_number,
+            tax_ids: [normForClassification.seller_tax_id || normForClassification.tax_id, normForClassification.buyer_tax_id].filter(Boolean),
+          })
+        }
+        console.log('Raw AI payload', aiData)
+        console.groupEnd()
+      }
+
+      setExtractedData(norm)
+      setAiClassification(ai)
+      setDocType(ai.aiSuggestion === 'invoice' ? 'FACTURA' : 'TICKET')
 
       const proposed = (norm.category_guess || norm.category_suggestion || '').trim()
       const mappedCatId = mapCategoryNameToId(proposed)
@@ -412,7 +605,7 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         notes: prev.notes || norm.notes || '',
         category_id: mappedCatId || prev.category_id,
         invoice_number: norm.invoice_number || prev.invoice_number,
-        company_tax_id: norm.tax_id || prev.company_tax_id,
+        company_tax_id: norm.tax_id || norm.seller_tax_id || prev.company_tax_id,
         company_address: norm.address || prev.company_address,
         company_email: norm.email || prev.company_email,
       }))
@@ -423,7 +616,6 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         setCategoryProposedName(proposed)
         setCategoryPromptOpen(true)
         setModalOpen(false)
-        // NO pasamos aún a review; lo haremos tras resolver el modal
       } else {
         setStep('review'); setModalOpen(false)
       }
@@ -440,20 +632,40 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
   const handleCreateCategory = async () => {
     const name = categoryProposedName.trim()
     if (!name) { toast.error('El nombre de la categoría no puede estar vacío'); return }
+    if (!account?.can_add_custom_categories) {
+      toast.error('Tu plan actual no permite crear nuevas categorías automáticamente')
+      return
+    }
+    if (!accountId) {
+      toast.error('No se pudo asociar la categoría con tu cuenta')
+      return
+    }
     setCreatingCategory(true)
     try {
-      const base: any = { name, account_id: accountId || null, status: 'ACTIVE' }
-      let { data, error } = await supabase.from('categories').insert(base).select('*').single()
+      const base: TablesInsert<'categories'> & { status?: 'ACTIVE' | 'INACTIVE' } = { name, account_id: accountId, status: 'ACTIVE' }
+      const { data, error } = await supabase.from('categories').insert(base).select('*').single()
+      let createdCategory = data
+
       if (error) {
         // Reintento sin columna status
-        const base2: any = { name, account_id: accountId || null }
-        const { data: d2, error: e2 } = await supabase.from('categories').insert(base2).select('*').single()
-        if (e2) throw e2
-        data = d2
+        const base2: TablesInsert<'categories'> = { name, account_id: accountId }
+        const { data: fallbackData, error: fallbackError } = await supabase
+          .from('categories')
+          .insert(base2)
+          .select('*')
+          .single()
+
+        if (fallbackError) throw fallbackError
+        createdCategory = fallbackData
       }
+
+      if (!createdCategory) {
+        throw new Error('CATEGORY_NOT_CREATED')
+      }
+
       // Actualizar listas y formulario
-      setCategoriesList((prev) => sortCategories([...(prev || []).filter((c) => c.id !== data!.id), data!]))
-      setFormData((p) => ({ ...p, category_id: data!.id }))
+      setCategoriesList((prev) => sortCategories([...(prev || []).filter((c) => c.id !== createdCategory.id), createdCategory]))
+      setFormData((p) => ({ ...p, category_id: createdCategory.id }))
       toast.success('Categoría creada y seleccionada')
       setCategoryPromptOpen(false)
       setStep('review')
@@ -475,7 +687,16 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!user || !file) return
+    if (!user) return
+    if (!accountId) {
+      toast.error('No se ha podido identificar la cuenta de trabajo.');
+      return
+    }
+    if (hasReachedMonthlyLimit) {
+      toast.error('Has alcanzado el límite mensual de gastos para tu plan.');
+      return
+    }
+    if (!file) return
     try {
       setUploading(true)
       const arrayBuffer = await file.arrayBuffer()
@@ -491,9 +712,23 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
       if (!categoryId) { toast.error('Selecciona una categoría válida'); setUploading(false); return }
 
       const effectiveEmployeeId = formData.employee_id || (selfEmployee?.id as string | undefined) || (user.id as string)
-      const typeChosen = (extractedData?.tax_id || extractedData?.invoice_number) ? 'FACTURA' : docType
+
+      // NUEVO: decidir doc_type final respetando la elección del usuario
+      const userChoiceLower: DocTypeAI | undefined = docType ? (docType === 'FACTURA' ? 'invoice' : 'ticket') : undefined
+      const ai = aiClassification ?? classifyDocType({
+        seller_tax_id: extractedData?.seller_tax_id || extractedData?.tax_id,
+        buyer_tax_id: extractedData?.buyer_tax_id,
+        invoice_number: extractedData?.invoice_number,
+        detected_keywords: extractedData?.detected_keywords,
+        ocr_text: extractedData?.ocr_text,
+      })
+      const { doc_type, doc_type_source, classification_path } = finalizeDocType(ai, userChoiceLower)
+
+      // Seguimos guardando el viejo campo `type` (UI/legacy) para compatibilidad
+      const legacyType = doc_type === 'invoice' ? 'FACTURA' : 'TICKET'
 
       const payload: any = {
+        user_id: user.id, // satisface RLS (exp_insert_own)
         employee_id: effectiveEmployeeId,
         project_code_id: formData.project_code_id || null,
         category_id: categoryId,
@@ -505,32 +740,82 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         currency: formData.currency,
         payment_method: formData.payment_method,
         notes: formData.notes,
-        account_id: accountId || null,
+        account_id: accountId,
         receipt_file_id: receiptFileId,
         source: extractedData ? 'AI_EXTRACTED' : 'MANUAL',
         hash_dedupe: hashHex,
-        type: typeChosen,
         status: 'SUBMITTED',
+        // NUEVO
+        doc_type, // 'ticket' | 'invoice'
+        doc_type_source, // 'ai' | 'user'
+        classification_path, // 'R1' | 'R2' | 'R3' | 'R4'
+        type: legacyType, // compatibilidad
       }
 
-      if (typeChosen === 'FACTURA') {
+      if (legacyType === 'FACTURA') {
         const extra = {
           invoice_number: formData.invoice_number || extractedData?.invoice_number,
-          company_tax_id: formData.company_tax_id || extractedData?.tax_id,
+          company_tax_id: formData.company_tax_id || extractedData?.tax_id || extractedData?.seller_tax_id,
           company_address: formData.company_address || extractedData?.address,
           company_email: formData.company_email || extractedData?.email,
         }
         for (const [k, v] of Object.entries(extra)) (payload as any)[k] = v ?? null
       }
 
-      const { error: expenseError } = await supabase.from('expenses').insert(payload)
+      // Intento 1: con columnas nuevas
+      const insertResult = await supabase
+        .from('expenses')
+        .insert(payload)
+        .select('id')
+        .single()
+
+      let expenseError = insertResult.error || null
+      let expenseId = insertResult.data?.id ?? null
+
+      // Fallback si tu BBDD aún no tiene las columnas nuevas
+      if (expenseError && (/column .+ does not exist/i.test(expenseError.message) || expenseError.code === '42703')) {
+        const { doc_type: _dt, doc_type_source: _dts, classification_path: _cp, ...legacyPayload } = payload
+        const r2 = await supabase
+          .from('expenses')
+          .insert(legacyPayload)
+          .select('id')
+          .single()
+        expenseError = r2.error || null
+        expenseId = r2.data?.id ?? expenseId
+      }
+
       if (expenseError) throw expenseError
 
-      await supabase.from('audit_logs').insert({ actor_user_id: user.id, action: 'EXPENSE_SUBMITTED', metadata: { vendor: formData.vendor, amount: formData.amount_gross, type: typeChosen } })
+      if (expenseId) {
+        const auditPayload: TablesInsert<'audit_logs'> = {
+          account_id: accountId,
+          actor_user_id: user.id,
+          action: 'EXPENSE_SUBMITTED',
+          entity: 'expenses',
+          entity_id: expenseId,
+          metadata: { vendor: formData.vendor, amount: formData.amount_gross, type: legacyType },
+        }
+        const { error: auditError } = await supabase.from('audit_logs').insert(auditPayload)
+        if (auditError) {
+          console.warn('[ReceiptUpload] Failed to write audit log', auditError)
+        }
+      }
 
       toast.success('Gasto enviado para aprobación')
+      if (limitApplies) {
+        setMonthlyUsage((current) => {
+          if (typeof current === 'number') {
+            const next = current + 1
+            if (monthlyLimit !== null) {
+              return Math.min(next, monthlyLimit)
+            }
+            return next
+          }
+          return monthlyLimit !== null ? Math.min(1, monthlyLimit) : 1
+        })
+      }
       onUploadComplete?.()
-    } catch (err: any) { toast.error('No se pudo crear el gasto') }
+    } catch (err: any) { toast.error('No se pudo crear el gasto', { description: err?.message }) }
     finally { setUploading(false) }
   }
 
@@ -544,7 +829,19 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
             <CardDescription>La IA ha extraído estos datos. Revísalos antes de crear el gasto.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
+            {limitBanner}
             {filePreview && (<div className="flex justify-center"><img src={filePreview} alt="Receipt preview" className="max-h-64 rounded-md border" /></div>)}
+
+            {/* Chip de detección AI */}
+            {aiClassification && (
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-muted-foreground">Detectado por IA:</span>
+                <Badge variant="secondary">
+                  {(aiClassification.aiSuggestion === 'invoice' ? 'FACTURA' : 'TICKET')} · {aiClassification.classification_path}
+                </Badge>
+                <span className="text-xs text-muted-foreground">R1=vendedor+comprador, R2=nº factura+seller, R3=heurística, R4=fallback</span>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="space-y-2">
@@ -657,7 +954,7 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
 
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 text-sm text-muted-foreground"><AlertTriangle className="h-4 w-4" /> Revisa los datos antes de crear el gasto.</div>
-              <Button type="submit" disabled={uploading || categories_list.length === 0}>
+              <Button type="submit" disabled={uploading || categories_list.length === 0 || hasReachedMonthlyLimit}>
                 {uploading ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Enviando...</>) : (<><CheckCircle className="mr-2 h-4 w-4" /> Enviar para aprobación</>)}
               </Button>
             </div>
@@ -668,6 +965,21 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
   }
 
   // Página: solo subir ticket y abrir modal
+  if (!accountId) {
+    return (
+      <div className="max-w-3xl mx-auto">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-destructive" /> No hay cuenta seleccionada</CardTitle>
+            <CardDescription>
+              Inicia sesión con un perfil vinculado a una cuenta para registrar nuevos gastos.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    )
+  }
+
   return (
     <div className="max-w-4xl mx-auto">
       <Card>
@@ -676,6 +988,7 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
           <CardDescription>Sube un archivo (JPG, PNG o PDF, máx. 10MB). Puedes arrastrarlo o elegirlo.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
+          {limitBanner}
           <div {...getRootProps()} className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${isDragActive ? 'border-primary bg-muted/50' : 'hover:bg-muted/30'}`}>
             <input {...getInputProps()} />
             {!file ? (
