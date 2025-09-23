@@ -129,9 +129,11 @@ export default function CompanyProfilePage() {
           activeEmployees={metrics.active}
           maxEmployees={maxEmployees}
         />
-        <Button className="self-start" variant="outline" onClick={() => navigate('/configuracion')}>
-          Configurar empresa
-        </Button>
+        {profile?.role === 'ADMIN' && (
+          <Button className="self-start" variant="outline" onClick={() => navigate('/configuracion')}>
+            Configurar empresa
+          </Button>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Card>
