@@ -138,6 +138,7 @@ export default function RegistrationConfirmationPage() {
                     <li>• Tu cuenta será activada automáticamente tras la confirmación</li>
                     <li>• Podrás acceder al sistema como Administrador</li>
                     <li>• Desde tu cuenta podrás registrar empleados</li>
+                    <li>• Disfrutarás de la demo Professional durante 30 días sin tarjeta</li>
                   </ul>
                 </div>
 
@@ -149,8 +150,12 @@ export default function RegistrationConfirmationPage() {
                     Ir al Login
                   </Button>
                   
-                  <div className="text-xs text-muted-foreground">
-                    Si no recibes el correo en unos minutos, revisa tu carpeta de spam
+                  <div className="text-xs text-muted-foreground space-y-1">
+                    <p>Si no recibes el correo en unos minutos, revisa tu carpeta de spam.</p>
+                    <p>
+                      Te avisaremos antes de eliminar los datos creados durante la demo si decides no continuar con el
+                      plan Professional.
+                    </p>
                   </div>
                 </div>
               </div>

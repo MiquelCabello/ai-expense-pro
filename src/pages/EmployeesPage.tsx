@@ -38,6 +38,7 @@ interface Employee {
 
 export default function EmployeesPage() {
   const { profile, account } = useAuth();
+  const isAdmin = profile?.role === 'ADMIN';
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -59,17 +60,23 @@ export default function EmployeesPage() {
   const planLabel = account?.plan ?? 'FREE';
   const planNameMap: Record<string, string> = { FREE: 'Starter', PROFESSIONAL: 'Professional', ENTERPRISE: 'Enterprise' };
   const planName = planNameMap[planLabel] ?? planLabel;
+  const professionalAdminCap = 2;
+  const isProfessionalPlan = planLabel === 'PROFESSIONAL';
   const activeEmployeesCount = employees.filter(employee => employee.status === 'ACTIVE').length;
+  const activeAdminCount = employees.filter(employee => employee.role === 'ADMIN' && employee.status === 'ACTIVE').length;
+  const adminLimitReached = isProfessionalPlan && canAssignRoles && activeAdminCount >= professionalAdminCap;
+  const remainingAdminSlots = isProfessionalPlan ? Math.max(professionalAdminCap - activeAdminCount, 0) : null;
+  const showRoleSelector = canAssignRoles && (!isProfessionalPlan || !adminLimitReached);
   const isAtEmployeeLimit = typeof maxEmployees === 'number' && activeEmployeesCount >= maxEmployees;
 
   useEffect(() => {
     setNewEmployee(prev => ({
       ...prev,
-      role: canAssignRoles ? prev.role : 'EMPLOYEE',
+      role: showRoleSelector ? prev.role : 'EMPLOYEE',
       department: canAssignDepartment ? prev.department : '',
       region: canAssignRegion ? prev.region : ''
     }));
-  }, [canAssignRoles, canAssignDepartment, canAssignRegion]);
+  }, [showRoleSelector, canAssignDepartment, canAssignRegion]);
 
   const fetchEmployees = useCallback(async () => {
     try {
@@ -110,14 +117,14 @@ export default function EmployeesPage() {
   }, [accountId]);
 
   useEffect(() => {
-    if (profile?.role === 'ADMIN') {
+    if (isAdmin) {
       fetchEmployees();
     }
-  }, [profile, accountId, fetchEmployees]);
+  }, [isAdmin, accountId, fetchEmployees]);
 
 
   const handleCreateEmployee = async () => {
-    if (!accountId || profile?.role !== 'ADMIN') {
+    if (!accountId || !isAdmin) {
       toast.error('No tienes permisos para crear empleados');
       return;
     }
@@ -139,8 +146,13 @@ export default function EmployeesPage() {
       return;
     }
 
+    if (newEmployee.role === 'ADMIN' && !showRoleSelector) {
+      toast.error('Ya has alcanzado el cupo de administradores activos para tu plan');
+      return;
+    }
+
     try {
-      const sanitizedRole = canAssignRoles ? newEmployee.role : 'EMPLOYEE';
+      const sanitizedRole = showRoleSelector ? newEmployee.role : 'EMPLOYEE';
       const sanitizedDepartment = canAssignDepartment ? newEmployee.department.trim() : '';
       const sanitizedRegion = canAssignRegion ? newEmployee.region.trim() : '';
 
@@ -169,7 +181,11 @@ export default function EmployeesPage() {
         let message = 'Error creando empleado';
         try {
           const payload = await response.json();
-          message = payload?.message || payload?.error || message;
+          if (payload?.error === 'department_admin_exists') {
+            message = 'Ya existe un administrador asignado para este departamento';
+          } else {
+            message = payload?.message || payload?.error || message;
+          }
         } catch {}
         throw new Error(message);
       }
@@ -187,7 +203,15 @@ export default function EmployeesPage() {
       fetchEmployees();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Error creando empleado';
-      toast.error(message === 'EMPLOYEE_LIMIT_REACHED' ? 'Has alcanzado el número máximo de usuarios para tu plan' : message);
+      toast.error(
+        message === 'EMPLOYEE_LIMIT_REACHED'
+          ? 'Has alcanzado el número máximo de usuarios para tu plan'
+          : message === 'ADMIN_LIMIT_REACHED'
+            ? 'Solo puedes tener dos administradores activos en el plan Professional'
+            : message === 'ADMIN_LIMIT_CHECK_FAILED'
+              ? 'No pudimos verificar el cupo de administradores. Inténtalo de nuevo más tarde.'
+              : message
+      );
     }
   };
 
@@ -237,14 +261,21 @@ export default function EmployeesPage() {
     );
   };
 
-  const filteredEmployees = employees.filter(employee =>
-    employee.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    employee.department?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    employee.region?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const normalizedSearchTerm = searchTerm.toLowerCase();
+
+  const filteredEmployees = employees.filter(employee => {
+    const normalizedDepartment = (employee.department ?? '').toLowerCase();
+    const normalizedRegion = (employee.region ?? '').toLowerCase();
+
+    return (
+      employee.name.toLowerCase().includes(normalizedSearchTerm) ||
+      normalizedDepartment.includes(normalizedSearchTerm) ||
+      normalizedRegion.includes(normalizedSearchTerm)
+    );
+  });
 
   // Check if current user is admin
-  if (profile?.role !== 'ADMIN') {
+  if (!isAdmin) {
     return (
       <AppLayout>
         <div className="p-6 flex items-center justify-center min-h-[400px]">
@@ -283,7 +314,7 @@ export default function EmployeesPage() {
             <p className="text-muted-foreground">
               Administra usuarios y permisos del sistema
             </p>
-            {profile?.role === 'ADMIN' && (
+            {isAdmin && (
               <p className={`text-sm mt-1 ${isAtEmployeeLimit ? 'text-destructive' : 'text-muted-foreground'}`}>
                 Plan {planName} · {maxEmployees ? `${activeEmployeesCount}/${maxEmployees} usuarios activos` : `${activeEmployeesCount} usuarios activos`}
               </p>
@@ -308,7 +339,7 @@ export default function EmployeesPage() {
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4">
-                {!canAssignRoles || !canAssignDepartment || !canAssignRegion ? (
+                {!showRoleSelector || !canAssignDepartment || !canAssignRegion ? (
                   <p className="text-xs text-muted-foreground">
                     Los empleados creados en el plan {planName} recibirán acceso estándar. Podrás ampliar estas opciones al mejorar de plan.
                   </p>
@@ -332,7 +363,7 @@ export default function EmployeesPage() {
                     placeholder="correo@empresa.com"
                   />
                 </div>
-                {canAssignRoles && (
+                {showRoleSelector && (
                   <div className="space-y-2">
                     <Label htmlFor="role">Rol</Label>
                     <Select value={newEmployee.role} onValueChange={(value: 'ADMIN' | 'EMPLOYEE') => setNewEmployee({ ...newEmployee, role: value })}>
@@ -345,6 +376,13 @@ export default function EmployeesPage() {
                       </SelectContent>
                     </Select>
                   </div>
+                )}
+                {isProfessionalPlan && canAssignRoles && remainingAdminSlots !== null && (
+                  <p className="text-xs text-muted-foreground">
+                    {remainingAdminSlots > 0
+                      ? `Te ${remainingAdminSlots === 1 ? 'queda' : 'quedan'} ${remainingAdminSlots} ${remainingAdminSlots === 1 ? 'cupo' : 'cupos'} de administrador disponible${remainingAdminSlots === 1 ? '' : 's'}.`
+                      : 'Ya tienes el máximo de administradores activos permitidos en tu plan.'}
+                  </p>
                 )}
                 {(canAssignDepartment || canAssignRegion) && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

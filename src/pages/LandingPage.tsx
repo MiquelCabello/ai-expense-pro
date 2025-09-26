@@ -124,6 +124,11 @@ export default function LandingPage() {
             </Button>
           </div>
 
+          <p className="text-sm text-muted-foreground max-w-xl mx-auto">
+            Activa la demo Professional sin introducir tarjeta. Te avisaremos antes de eliminar los datos creados durante el
+            periodo de prueba si decides no continuar.
+          </p>
+
           {/* Feature Icons */}
           <div className="flex flex-wrap justify-center gap-8 text-muted-foreground">
             <div className="flex items-center space-x-2">

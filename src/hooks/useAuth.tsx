@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
+import type { Database } from '@/integrations/supabase/types';
 
 const OWNER_EMAIL = 'info@miquelcabello.com';
 
@@ -52,11 +53,19 @@ export interface Account {
   monthly_expense_limit: number | null;
 }
 
+type ProfileRow = Database['public']['Tables']['profiles']['Row'];
+type EnrichedProfileRow = ProfileRow & { account?: Account | null };
+
 const applyPlanDefaults = (account: Account): Account => {
   const defaults = PLAN_DEFAULTS[account.plan];
-  const normalizedRoleCapability = account.plan === 'ENTERPRISE'
-    ? (account.can_assign_roles ?? defaults.canAssignRoles)
-    : false;
+  let normalizedRoleCapability: boolean;
+  if (account.plan === 'ENTERPRISE') {
+    normalizedRoleCapability = account.can_assign_roles ?? defaults.canAssignRoles;
+  } else if (account.plan === 'PROFESSIONAL') {
+    normalizedRoleCapability = account.can_assign_roles === true;
+  } else {
+    normalizedRoleCapability = false;
+  }
   return {
     ...account,
     max_employees: account.max_employees ?? defaults.maxEmployees,
@@ -68,12 +77,16 @@ const applyPlanDefaults = (account: Account): Account => {
   };
 };
 
-const buildEnterpriseAccount = (id: string, name?: string | null): Account =>
+const buildEnterpriseAccount = (
+  id: string,
+  ownerUserId: string,
+  name?: string | null
+): Account =>
   applyPlanDefaults({
     id,
     name: name || 'Cuenta principal',
     plan: 'ENTERPRISE',
-    owner_user_id: id,
+    owner_user_id: ownerUserId,
     max_employees: null,
     can_assign_roles: true,
     can_assign_department: true,
@@ -121,12 +134,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile(null);
     };
 
-    const applyProfile = (rawProfile: any, currentUser: User) => {
+    const applyProfile = (rawProfile: EnrichedProfileRow | null, currentUser: User) => {
       if (!mounted) return;
 
       if (!rawProfile) {
         if (isOwnerEmail(currentUser.email)) {
-          const ownerAccount = buildEnterpriseAccount(currentUser.id, currentUser.email);
+          const ownerAccount = buildEnterpriseAccount(currentUser.id, currentUser.id, currentUser.email);
           const ownerName = (currentUser.user_metadata as Record<string, unknown> | undefined)?.name;
           const masterProfile: Profile = {
             id: currentUser.id,
@@ -149,6 +162,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const metadata = currentUser.user_metadata as Record<string, unknown> | undefined;
       const hasAccountId = Object.prototype.hasOwnProperty.call(rawProfile, 'account_id');
       const rawPlan = typeof metadata?.plan === 'string' ? metadata.plan.toUpperCase() : undefined;
+      const metadataAccountId = typeof metadata?.account_id === 'string' && metadata.account_id.length > 0
+        ? metadata.account_id
+        : null;
+      const metadataOwnerId = typeof metadata?.account_owner_id === 'string' && metadata.account_owner_id.length > 0
+        ? metadata.account_owner_id
+        : null;
       const allowedPlans: Array<'FREE' | 'PROFESSIONAL' | 'ENTERPRISE'> = ['FREE', 'PROFESSIONAL', 'ENTERPRISE'];
       const fallbackPlan: 'FREE' | 'PROFESSIONAL' | 'ENTERPRISE' = allowedPlans.includes(rawPlan as any)
         ? (rawPlan as 'FREE' | 'PROFESSIONAL' | 'ENTERPRISE')
@@ -165,31 +184,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         ...(hasAccountId && rawProfile.account_id ? { account_id: rawProfile.account_id as string } : {}),
       };
 
-      let resolvedAccount: Account | null = rawProfile.account
-        ? applyPlanDefaults({
-            id: rawProfile.account.id,
-            name: rawProfile.account.name,
-            plan: rawProfile.account.plan,
-            owner_user_id: rawProfile.account.owner_user_id,
-            max_employees: rawProfile.account.max_employees,
-            can_assign_roles: rawProfile.account.can_assign_roles,
-            can_assign_department: rawProfile.account.can_assign_department,
-            can_assign_region: rawProfile.account.can_assign_region,
-            can_add_custom_categories: rawProfile.account.can_add_custom_categories,
-            monthly_expense_limit: rawProfile.account.monthly_expense_limit ?? null,
-          })
-        : null;
+      let resolvedAccount: Account | null = null;
+      let resolvedAccountSource: 'persisted' | 'fallback' | null = null;
+
+      if (rawProfile.account) {
+        resolvedAccount = applyPlanDefaults({
+          id: rawProfile.account.id,
+          name: rawProfile.account.name,
+          plan: rawProfile.account.plan,
+          owner_user_id: rawProfile.account.owner_user_id,
+          max_employees: rawProfile.account.max_employees,
+          can_assign_roles: rawProfile.account.can_assign_roles,
+          can_assign_department: rawProfile.account.can_assign_department,
+          can_assign_region: rawProfile.account.can_assign_region,
+          can_add_custom_categories: rawProfile.account.can_add_custom_categories,
+          monthly_expense_limit: rawProfile.account.monthly_expense_limit ?? null,
+        });
+        resolvedAccountSource = 'persisted';
+      }
 
       if (!resolvedAccount) {
         const fallbackAccountId = (hasAccountId && rawProfile.account_id)
           ? (rawProfile.account_id as string)
-          : (typeof metadata?.account_id === 'string' && metadata.account_id.length > 0
-            ? metadata.account_id
-            : rawProfile.user_id ?? currentUser.id);
+          : (metadataAccountId ?? rawProfile.user_id ?? currentUser.id);
 
-        const fallbackOwnerId = typeof metadata?.account_owner_id === 'string' && metadata.account_owner_id.length > 0
-          ? metadata.account_owner_id
-          : rawProfile.user_id ?? currentUser.id;
+        const fallbackOwnerId = metadataOwnerId ?? null;
 
         const fallbackName = typeof metadata?.company_name === 'string' && metadata.company_name.length > 0
           ? metadata.company_name
@@ -199,7 +218,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           id: fallbackAccountId,
           name: fallbackName,
           plan: fallbackPlan,
-          owner_user_id: fallbackOwnerId,
+          owner_user_id: fallbackOwnerId ?? '',
           max_employees: null,
           can_assign_roles: fallbackPlan === 'ENTERPRISE',
           can_assign_department: fallbackPlan !== 'FREE',
@@ -207,6 +226,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           can_add_custom_categories: fallbackPlan === 'ENTERPRISE',
           monthly_expense_limit: fallbackPlan === 'FREE' ? 50 : null,
         });
+        resolvedAccountSource = 'fallback';
       }
 
       if (isOwnerEmail(currentUser.email)) {
@@ -220,12 +240,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           baseProfile.account_id = accountId;
         }
 
-        resolvedAccount = buildEnterpriseAccount(accountId, baseProfile.name);
+        const ownerUserId = resolvedAccount?.owner_user_id ?? baseProfile.user_id ?? currentUser.id;
+        resolvedAccount = buildEnterpriseAccount(accountId, ownerUserId, baseProfile.name);
       } else if (resolvedAccount) {
         if (!baseProfile.account_id) {
           baseProfile.account_id = resolvedAccount.id;
         }
-        if (resolvedAccount.owner_user_id === currentUser.id) {
+        const ownsAccount = (metadataOwnerId === currentUser.id)
+          || (resolvedAccountSource === 'persisted' && resolvedAccount.owner_user_id === currentUser.id);
+        if (ownsAccount) {
           baseProfile.role = 'ADMIN';
         }
       }
@@ -248,7 +271,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (error) throw error;
 
-        let enrichedProfile = data;
+        let enrichedProfile: EnrichedProfileRow | null = data;
 
         if (enrichedProfile && !enrichedProfile.account) {
           const hasAccountId = Object.prototype.hasOwnProperty.call(enrichedProfile, 'account_id');
@@ -286,7 +309,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                   can_add_custom_categories: accountRow.can_add_custom_categories,
                   monthly_expense_limit: accountRow.monthly_expense_limit ?? null,
                 });
-                enrichedProfile = { ...enrichedProfile, account: normalized, account_id: enrichedProfile.account_id ?? normalized.id };
+                enrichedProfile = {
+                  ...enrichedProfile,
+                  account: normalized,
+                  account_id: enrichedProfile.account_id ?? normalized.id,
+                };
               }
             } catch (accountFetchError) {
               console.warn('[Auth] Failed to load related account', accountFetchError);

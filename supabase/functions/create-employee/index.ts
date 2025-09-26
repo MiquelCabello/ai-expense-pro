@@ -1,4 +1,4 @@
-/// <reference path="../types.d.ts" />
+import "../types.d.ts";
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -363,9 +363,8 @@ serve(async (req) => {
     });
   }
 
-  const allowsAdminInvites = account.plan === 'ENTERPRISE' && account.can_assign_roles === true;
+  const professionalAdminCap = 2;
   const requestedRole = payload.role === 'ADMIN' ? 'ADMIN' : 'EMPLOYEE';
-  const normalizedRole = allowsAdminInvites && requestedRole === 'ADMIN' ? 'ADMIN' : 'EMPLOYEE';
   const rawDepartment = typeof payload.department === 'string' ? payload.department.trim() : '';
   const rawRegion = typeof payload.region === 'string' ? payload.region.trim() : '';
   const normalizedDepartment = account.can_assign_department ? (rawDepartment || null) : null;
@@ -398,13 +397,16 @@ serve(async (req) => {
     }
   }
 
-  let activeCount: number | null = null;
+  const accountIdentifier = accountId ?? account.id;
 
-  if (accountTableAvailable) {
+  let activeEmployeeCount: number | null = null;
+  let activeAdminCount: number | null = null;
+
+  if (accountIdentifier) {
     const { count, error: countError } = await adminClient
       .from('profiles')
       .select('id', { count: 'exact', head: true })
-      .eq('account_id', account.id)
+      .eq('account_id', accountIdentifier)
       .eq('status', 'ACTIVE');
 
     if (countError) {
@@ -414,14 +416,30 @@ serve(async (req) => {
       });
     }
 
-    activeCount = count;
+    activeEmployeeCount = count;
+
+    const { count: adminCount, error: adminCountError } = await adminClient
+      .from('profiles')
+      .select('id', { count: 'exact', head: true })
+      .eq('account_id', accountIdentifier)
+      .eq('status', 'ACTIVE')
+      .eq('role', 'ADMIN');
+
+    if (adminCountError) {
+      return new Response(JSON.stringify({ error: 'admin_count_failed' }), {
+        status: 500,
+        headers: jsonHeaders,
+      });
+    }
+
+    activeAdminCount = adminCount;
   }
 
   if (
-    accountTableAvailable &&
+    accountIdentifier &&
     typeof account.max_employees === 'number' &&
-    activeCount !== null &&
-    activeCount >= account.max_employees
+    activeEmployeeCount !== null &&
+    activeEmployeeCount >= account.max_employees
   ) {
     return new Response(JSON.stringify({ error: 'EMPLOYEE_LIMIT_REACHED' }), {
       status: 409,
@@ -429,7 +447,30 @@ serve(async (req) => {
     });
   }
 
-  const accountIdentifier = accountId ?? account.id;
+  let normalizedRole: 'ADMIN' | 'EMPLOYEE' = 'EMPLOYEE';
+
+  if (requestedRole === 'ADMIN') {
+    if (account.plan === 'ENTERPRISE' && account.can_assign_roles === true) {
+      normalizedRole = 'ADMIN';
+    } else if (account.plan === 'PROFESSIONAL' && account.can_assign_roles === true) {
+      if (activeAdminCount === null) {
+        return new Response(JSON.stringify({ error: 'ADMIN_LIMIT_CHECK_FAILED' }), {
+          status: 503,
+          headers: jsonHeaders,
+        });
+      }
+
+      if (activeAdminCount >= professionalAdminCap) {
+        return new Response(JSON.stringify({ error: 'ADMIN_LIMIT_REACHED' }), {
+          status: 409,
+          headers: jsonHeaders,
+        });
+      }
+
+      normalizedRole = 'ADMIN';
+    }
+  }
+
   const accountOwnerId = account?.owner_user_id ?? adminUser.id;
 
   const userMetadata: Record<string, unknown> = {
@@ -454,9 +495,28 @@ serve(async (req) => {
   });
 
   if (createResponse.error) {
-    const code = createResponse.error.message?.includes('already registered') ? 409 : 400;
-    return new Response(JSON.stringify({ error: createResponse.error.message || 'create_failed' }), {
-      status: code,
+    const errorMessage = createResponse.error.message ?? '';
+    const errorCode = (createResponse.error as { code?: string } | null)?.code ?? '';
+    const duplicateKeySignals = [
+      errorCode === '23505',
+      errorMessage.includes('23505'),
+      errorMessage.includes('duplicate key value'),
+      errorMessage.includes('department_admin_unique_per_department'),
+    ];
+
+    if (duplicateKeySignals.some(Boolean)) {
+      return new Response(JSON.stringify({ error: 'department_admin_exists' }), {
+        status: 409,
+        headers: jsonHeaders,
+      });
+    }
+
+    const statusCode = errorMessage.includes('already registered')
+      ? 409
+      : createResponse.error.status ?? 400;
+
+    return new Response(JSON.stringify({ error: errorMessage || 'create_failed' }), {
+      status: statusCode,
       headers: jsonHeaders,
     });
   }
