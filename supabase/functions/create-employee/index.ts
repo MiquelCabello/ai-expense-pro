@@ -363,9 +363,12 @@ serve(async (req) => {
     });
   }
 
+<<<<<<< ours
   const allowsAdminInvites = account.can_assign_roles === true;
+=======
+  const professionalAdminCap = 2;
+>>>>>>> theirs
   const requestedRole = payload.role === 'ADMIN' ? 'ADMIN' : 'EMPLOYEE';
-  const normalizedRole = allowsAdminInvites && requestedRole === 'ADMIN' ? 'ADMIN' : 'EMPLOYEE';
   const rawDepartment = typeof payload.department === 'string' ? payload.department.trim() : '';
   const rawRegion = typeof payload.region === 'string' ? payload.region.trim() : '';
   const normalizedDepartment = account.can_assign_department ? (rawDepartment || null) : null;
@@ -398,13 +401,16 @@ serve(async (req) => {
     }
   }
 
-  let activeCount: number | null = null;
+  const accountIdentifier = accountId ?? account.id;
 
-  if (accountTableAvailable) {
+  let activeEmployeeCount: number | null = null;
+  let activeAdminCount: number | null = null;
+
+  if (accountIdentifier) {
     const { count, error: countError } = await adminClient
       .from('profiles')
       .select('id', { count: 'exact', head: true })
-      .eq('account_id', account.id)
+      .eq('account_id', accountIdentifier)
       .eq('status', 'ACTIVE');
 
     if (countError) {
@@ -414,14 +420,30 @@ serve(async (req) => {
       });
     }
 
-    activeCount = count;
+    activeEmployeeCount = count;
+
+    const { count: adminCount, error: adminCountError } = await adminClient
+      .from('profiles')
+      .select('id', { count: 'exact', head: true })
+      .eq('account_id', accountIdentifier)
+      .eq('status', 'ACTIVE')
+      .eq('role', 'ADMIN');
+
+    if (adminCountError) {
+      return new Response(JSON.stringify({ error: 'admin_count_failed' }), {
+        status: 500,
+        headers: jsonHeaders,
+      });
+    }
+
+    activeAdminCount = adminCount;
   }
 
   if (
-    accountTableAvailable &&
+    accountIdentifier &&
     typeof account.max_employees === 'number' &&
-    activeCount !== null &&
-    activeCount >= account.max_employees
+    activeEmployeeCount !== null &&
+    activeEmployeeCount >= account.max_employees
   ) {
     return new Response(JSON.stringify({ error: 'EMPLOYEE_LIMIT_REACHED' }), {
       status: 409,
@@ -429,7 +451,30 @@ serve(async (req) => {
     });
   }
 
-  const accountIdentifier = accountId ?? account.id;
+  let normalizedRole: 'ADMIN' | 'EMPLOYEE' = 'EMPLOYEE';
+
+  if (requestedRole === 'ADMIN') {
+    if (account.plan === 'ENTERPRISE' && account.can_assign_roles === true) {
+      normalizedRole = 'ADMIN';
+    } else if (account.plan === 'PROFESSIONAL' && account.can_assign_roles === true) {
+      if (activeAdminCount === null) {
+        return new Response(JSON.stringify({ error: 'ADMIN_LIMIT_CHECK_FAILED' }), {
+          status: 503,
+          headers: jsonHeaders,
+        });
+      }
+
+      if (activeAdminCount >= professionalAdminCap) {
+        return new Response(JSON.stringify({ error: 'ADMIN_LIMIT_REACHED' }), {
+          status: 409,
+          headers: jsonHeaders,
+        });
+      }
+
+      normalizedRole = 'ADMIN';
+    }
+  }
+
   const accountOwnerId = account?.owner_user_id ?? adminUser.id;
 
   const userMetadata: Record<string, unknown> = {

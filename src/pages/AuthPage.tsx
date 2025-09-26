@@ -105,7 +105,7 @@ export default function AuthPage() {
             </div>
             <CardTitle>Acceso al Sistema</CardTitle>
             <CardDescription>
-              Inicia sesión o crea tu cuenta para gestionar gastos
+              Inicia sesión o crea tu cuenta y activa la demo Professional de 30 días sin tarjeta.
             </CardDescription>
           </CardHeader>
 
@@ -198,10 +198,18 @@ export default function AuthPage() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="FREE">Starter · Hasta 50 gastos/mes</SelectItem>
-                        <SelectItem value="PROFESSIONAL">Professional · 25 usuarios</SelectItem>
+                        <SelectItem value="PROFESSIONAL">Professional · Demo de 30 días sin tarjeta</SelectItem>
                         <SelectItem value="ENTERPRISE">Enterprise · Ilimitado</SelectItem>
                       </SelectContent>
                     </Select>
+                  </div>
+
+                  <div className="rounded-lg border border-dashed border-primary/40 bg-primary/5 p-4 text-sm">
+                    <p className="font-medium text-primary">Demo Professional sin riesgo</p>
+                    <p className="text-muted-foreground">
+                      Durante 30 días tendrás todas las funcionalidades avanzadas. Avisaremos antes de eliminar los
+                      datos creados si no pasas a un plan de pago.
+                    </p>
                   </div>
 
                   <div className="space-y-2">
@@ -246,7 +254,8 @@ export default function AuthPage() {
                   </Button>
 
                   <p className="text-xs text-muted-foreground text-center">
-                    Al registrarte, aceptas nuestros términos de servicio y política de privacidad
+                    Al registrarte, aceptas nuestros términos de servicio y política de privacidad. Siempre recibirás un
+                    aviso previo antes de que eliminemos datos del periodo de prueba.
                   </p>
                 </form>
               </TabsContent>

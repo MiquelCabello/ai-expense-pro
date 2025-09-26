@@ -109,5 +109,11 @@ describe('AuthPage', () => {
     await user.click(registerTab)
 
     expect(await screen.findByLabelText(/nombre completo/i)).toBeInTheDocument()
+    expect(
+      await screen.findByText(/demo professional sin riesgo/i)
+    ).toBeInTheDocument()
+    expect(
+      await screen.findByText(/avisaremos antes de eliminar los datos creados/i)
+    ).toBeInTheDocument()
   })
 })
