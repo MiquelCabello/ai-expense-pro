@@ -85,12 +85,16 @@ const applyPlanDefaults = (account: Account): Account => {
   };
 };
 
-const buildEnterpriseAccount = (id: string, name?: string | null): Account =>
+const buildEnterpriseAccount = (
+  id: string,
+  ownerUserId: string,
+  name?: string | null
+): Account =>
   applyPlanDefaults({
     id,
     name: name || 'Cuenta principal',
     plan: 'ENTERPRISE',
-    owner_user_id: id,
+    owner_user_id: ownerUserId,
     max_employees: null,
     can_assign_roles: true,
     can_assign_department: true,
@@ -143,7 +147,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (!rawProfile) {
         if (isOwnerEmail(currentUser.email)) {
-          const ownerAccount = buildEnterpriseAccount(currentUser.id, currentUser.email);
+          const ownerAccount = buildEnterpriseAccount(currentUser.id, currentUser.id, currentUser.email);
           const ownerName = (currentUser.user_metadata as Record<string, unknown> | undefined)?.name;
           const masterProfile: Profile = {
             id: currentUser.id,
@@ -244,7 +248,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           baseProfile.account_id = accountId;
         }
 
-        resolvedAccount = buildEnterpriseAccount(accountId, baseProfile.name);
+        const ownerUserId = resolvedAccount?.owner_user_id ?? baseProfile.user_id ?? currentUser.id;
+        resolvedAccount = buildEnterpriseAccount(accountId, ownerUserId, baseProfile.name);
       } else if (resolvedAccount) {
         if (!baseProfile.account_id) {
           baseProfile.account_id = resolvedAccount.id;
