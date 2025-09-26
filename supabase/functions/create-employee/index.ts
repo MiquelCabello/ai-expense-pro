@@ -363,11 +363,7 @@ serve(async (req) => {
     });
   }
 
-<<<<<<< ours
-  const allowsAdminInvites = account.can_assign_roles === true;
-=======
   const professionalAdminCap = 2;
->>>>>>> theirs
   const requestedRole = payload.role === 'ADMIN' ? 'ADMIN' : 'EMPLOYEE';
   const rawDepartment = typeof payload.department === 'string' ? payload.department.trim() : '';
   const rawRegion = typeof payload.region === 'string' ? payload.region.trim() : '';
