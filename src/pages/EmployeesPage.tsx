@@ -170,7 +170,11 @@ export default function EmployeesPage() {
         let message = 'Error creando empleado';
         try {
           const payload = await response.json();
-          message = payload?.message || payload?.error || message;
+          if (payload?.error === 'department_admin_exists') {
+            message = 'Ya existe un administrador asignado para este departamento';
+          } else {
+            message = payload?.message || payload?.error || message;
+          }
         } catch {}
         throw new Error(message);
       }
@@ -238,11 +242,18 @@ export default function EmployeesPage() {
     );
   };
 
-  const filteredEmployees = employees.filter(employee =>
-    employee.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    employee.department?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    employee.region?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const normalizedSearchTerm = searchTerm.toLowerCase();
+
+  const filteredEmployees = employees.filter(employee => {
+    const normalizedDepartment = (employee.department ?? '').toLowerCase();
+    const normalizedRegion = (employee.region ?? '').toLowerCase();
+
+    return (
+      employee.name.toLowerCase().includes(normalizedSearchTerm) ||
+      normalizedDepartment.includes(normalizedSearchTerm) ||
+      normalizedRegion.includes(normalizedSearchTerm)
+    );
+  });
 
   // Check if current user is admin
   if (!isAdmin) {

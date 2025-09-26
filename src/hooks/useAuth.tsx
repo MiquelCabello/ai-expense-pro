@@ -58,9 +58,10 @@ type EnrichedProfileRow = ProfileRow & { account?: Account | null };
 
 const applyPlanDefaults = (account: Account): Account => {
   const defaults = PLAN_DEFAULTS[account.plan];
-  const normalizedRoleCapability = account.plan === 'ENTERPRISE'
-    ? (account.can_assign_roles ?? defaults.canAssignRoles)
-    : false;
+  const normalizedRoleCapability =
+    typeof account.can_assign_roles === 'boolean'
+      ? account.can_assign_roles
+      : defaults.canAssignRoles;
   return {
     ...account,
     max_employees: account.max_employees ?? defaults.maxEmployees,

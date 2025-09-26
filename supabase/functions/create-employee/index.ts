@@ -363,7 +363,7 @@ serve(async (req) => {
     });
   }
 
-  const allowsAdminInvites = account.plan === 'ENTERPRISE' && account.can_assign_roles === true;
+  const allowsAdminInvites = account.can_assign_roles === true;
   const requestedRole = payload.role === 'ADMIN' ? 'ADMIN' : 'EMPLOYEE';
   const normalizedRole = allowsAdminInvites && requestedRole === 'ADMIN' ? 'ADMIN' : 'EMPLOYEE';
   const rawDepartment = typeof payload.department === 'string' ? payload.department.trim() : '';
@@ -454,9 +454,28 @@ serve(async (req) => {
   });
 
   if (createResponse.error) {
-    const code = createResponse.error.message?.includes('already registered') ? 409 : 400;
-    return new Response(JSON.stringify({ error: createResponse.error.message || 'create_failed' }), {
-      status: code,
+    const errorMessage = createResponse.error.message ?? '';
+    const errorCode = (createResponse.error as { code?: string } | null)?.code ?? '';
+    const duplicateKeySignals = [
+      errorCode === '23505',
+      errorMessage.includes('23505'),
+      errorMessage.includes('duplicate key value'),
+      errorMessage.includes('department_admin_unique_per_department'),
+    ];
+
+    if (duplicateKeySignals.some(Boolean)) {
+      return new Response(JSON.stringify({ error: 'department_admin_exists' }), {
+        status: 409,
+        headers: jsonHeaders,
+      });
+    }
+
+    const statusCode = errorMessage.includes('already registered')
+      ? 409
+      : createResponse.error.status ?? 400;
+
+    return new Response(JSON.stringify({ error: errorMessage || 'create_failed' }), {
+      status: statusCode,
       headers: jsonHeaders,
     });
   }
