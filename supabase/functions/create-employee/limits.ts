@@ -1,6 +1,13 @@
+<<<<<<< ours
 export type AccountPlan = "FREE" | "PROFESSIONAL" | "ENTERPRISE";
 
 export type PlanSettings = {
+=======
+export type AccountPlan = 'FREE' | 'PROFESSIONAL' | 'ENTERPRISE';
+
+export type PlanSettings = {
+  plan: AccountPlan;
+>>>>>>> theirs
   max_employees: number | null;
   can_assign_roles: boolean;
   can_assign_department: boolean;
@@ -9,11 +16,29 @@ export type PlanSettings = {
   monthly_expense_limit: number | null;
 };
 
+<<<<<<< ours
 export type AccountLimits = PlanSettings & { plan: AccountPlan };
 
 export const DEFAULT_PLAN: AccountPlan = "FREE";
 
 const BASE_PLAN_SETTINGS: Record<AccountPlan, PlanSettings> = {
+=======
+type MaybePlan = { plan?: AccountPlan | string | null };
+
+export type AccountLike = MaybePlan & {
+  plan: AccountPlan;
+  max_employees?: number | null;
+  can_assign_roles?: boolean | null;
+  can_assign_department?: boolean | null;
+  can_assign_region?: boolean | null;
+  can_add_custom_categories?: boolean | null;
+  monthly_expense_limit?: number | null;
+};
+
+const KNOWN_PLANS: AccountPlan[] = ['FREE', 'PROFESSIONAL', 'ENTERPRISE'];
+
+const PLAN_DEFAULTS: Record<AccountPlan, Omit<PlanSettings, 'plan'>> = {
+>>>>>>> theirs
   FREE: {
     max_employees: 2,
     can_assign_roles: false,
@@ -40,6 +65,7 @@ const BASE_PLAN_SETTINGS: Record<AccountPlan, PlanSettings> = {
   },
 };
 
+<<<<<<< ours
 const CAMEL_TO_SNAKE_MAP = {
   maxEmployees: "max_employees",
   canAssignRoles: "can_assign_roles",
@@ -185,3 +211,121 @@ export default {
   hasReachedEmployeeLimit,
   toCamelCaseLimits,
 };
+=======
+type PlanSettingKey = Exclude<keyof PlanSettings, 'plan'>;
+
+const PLAN_SETTING_KEYS: PlanSettingKey[] = [
+  'max_employees',
+  'can_assign_roles',
+  'can_assign_department',
+  'can_assign_region',
+  'can_add_custom_categories',
+  'monthly_expense_limit',
+];
+
+const normalizePlan = (rawPlan: string | AccountPlan | null | undefined): AccountPlan => {
+  if (typeof rawPlan === 'string') {
+    const normalized = rawPlan.toUpperCase() as AccountPlan;
+    if (KNOWN_PLANS.includes(normalized)) {
+      return normalized;
+    }
+  }
+  return 'FREE';
+};
+
+const cloneDefaults = (plan: AccountPlan): PlanSettings => ({
+  plan,
+  ...PLAN_DEFAULTS[plan],
+});
+
+const hasValue = <T>(value: T | null | undefined): value is T => value !== null && value !== undefined;
+
+export const resolvePlanSettings = (
+  subject: (Partial<AccountLike> & MaybePlan) | PlanSettings | null | undefined,
+  options?: {
+    fallbackPlan?: AccountPlan | string | null;
+    overrides?: Partial<PlanSettings>;
+  },
+): PlanSettings => {
+  const fallbackPlan = normalizePlan(options?.fallbackPlan ?? null);
+  const plan = normalizePlan(subject?.plan ?? fallbackPlan);
+  const defaults = cloneDefaults(plan);
+  const settings: PlanSettings = { ...defaults };
+
+  const applySetting = <K extends PlanSettingKey>(key: K) => {
+    const overrideValue = options?.overrides?.[key];
+    if (overrideValue !== undefined) {
+      settings[key] = overrideValue as PlanSettings[K];
+      return;
+    }
+
+    const subjectValue = subject ? (subject as Partial<PlanSettings>)[key] : undefined;
+    if (hasValue(subjectValue)) {
+      settings[key] = subjectValue as PlanSettings[K];
+      return;
+    }
+
+    settings[key] = defaults[key];
+  };
+
+  PLAN_SETTING_KEYS.forEach((key) => applySetting(key));
+
+  return settings;
+};
+
+export const hasReachedEmployeeLimit = (
+  subject: (Partial<AccountLike> & MaybePlan) | PlanSettings | null | undefined,
+  currentActiveEmployees: number,
+  options?: {
+    fallbackPlan?: AccountPlan | string | null;
+    overrides?: Partial<PlanSettings>;
+  },
+): boolean => {
+  const settings = resolvePlanSettings(subject, options);
+  const maxEmployees = settings.max_employees;
+  if (!hasValue(maxEmployees)) {
+    return false;
+  }
+  return currentActiveEmployees >= maxEmployees;
+};
+
+export const canAssignRole = (
+  subject: (Partial<AccountLike> & MaybePlan) | PlanSettings | null | undefined,
+  options?: {
+    fallbackPlan?: AccountPlan | string | null;
+    overrides?: Partial<PlanSettings>;
+  },
+): boolean => resolvePlanSettings(subject, options).can_assign_roles;
+
+export const canAssignDepartment = (
+  subject: (Partial<AccountLike> & MaybePlan) | PlanSettings | null | undefined,
+  options?: {
+    fallbackPlan?: AccountPlan | string | null;
+    overrides?: Partial<PlanSettings>;
+  },
+): boolean => resolvePlanSettings(subject, options).can_assign_department;
+
+export const canAssignRegion = (
+  subject: (Partial<AccountLike> & MaybePlan) | PlanSettings | null | undefined,
+  options?: {
+    fallbackPlan?: AccountPlan | string | null;
+    overrides?: Partial<PlanSettings>;
+  },
+): boolean => resolvePlanSettings(subject, options).can_assign_region;
+
+export const canAddCustomCategories = (
+  subject: (Partial<AccountLike> & MaybePlan) | PlanSettings | null | undefined,
+  options?: {
+    fallbackPlan?: AccountPlan | string | null;
+    overrides?: Partial<PlanSettings>;
+  },
+): boolean => resolvePlanSettings(subject, options).can_add_custom_categories;
+
+export const getMonthlyExpenseLimit = (
+  subject: (Partial<AccountLike> & MaybePlan) | PlanSettings | null | undefined,
+  options?: {
+    fallbackPlan?: AccountPlan | string | null;
+    overrides?: Partial<PlanSettings>;
+  },
+): number | null => resolvePlanSettings(subject, options).monthly_expense_limit;
+>>>>>>> theirs

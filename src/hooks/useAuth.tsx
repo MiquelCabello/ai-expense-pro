@@ -317,7 +317,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                   can_add_custom_categories: accountRow.can_add_custom_categories,
                   monthly_expense_limit: accountRow.monthly_expense_limit ?? null,
                 });
-                enrichedProfile = { ...enrichedProfile, account: normalized, account_id: enrichedProfile.account_id ?? normalized.id };
+                enrichedProfile = {
+                  ...enrichedProfile,
+                  account: normalized,
+                  account_id: enrichedProfile.account_id ?? normalized.id,
+                };
               }
             } catch (accountFetchError) {
               console.warn('[Auth] Failed to load related account', accountFetchError);
