@@ -165,18 +165,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         ...(hasAccountId && rawProfile.account_id ? { account_id: rawProfile.account_id as string } : {}),
       };
 
-      let resolvedAccount: Account | null = rawProfile.account
+      let resolvedAccount: Account | null = (rawProfile as any).accounts
         ? applyPlanDefaults({
-            id: rawProfile.account.id,
-            name: rawProfile.account.name,
-            plan: rawProfile.account.plan,
-            owner_user_id: rawProfile.account.owner_user_id,
-            max_employees: rawProfile.account.max_employees,
-            can_assign_roles: rawProfile.account.can_assign_roles,
-            can_assign_department: rawProfile.account.can_assign_department,
-            can_assign_region: rawProfile.account.can_assign_region,
-            can_add_custom_categories: rawProfile.account.can_add_custom_categories,
-            monthly_expense_limit: rawProfile.account.monthly_expense_limit ?? null,
+            id: (rawProfile as any).accounts.id,
+            name: (rawProfile as any).accounts.name,
+            plan: (rawProfile as any).accounts.plan,
+            owner_user_id: (rawProfile as any).accounts.owner_user_id,
+            max_employees: (rawProfile as any).accounts.max_employees,
+            can_assign_roles: (rawProfile as any).accounts.can_assign_roles,
+            can_assign_department: (rawProfile as any).accounts.can_assign_department,
+            can_assign_region: (rawProfile as any).accounts.can_assign_region,
+            can_add_custom_categories: (rawProfile as any).accounts.can_add_custom_categories,
+            monthly_expense_limit: (rawProfile as any).accounts.monthly_expense_limit ?? null,
           })
         : null;
 
@@ -242,7 +242,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const { data, error } = await supabase
           .from('profiles')
-          .select('*')
+          .select(`
+            *,
+            accounts (
+              id,
+              name,
+              plan,
+              owner_user_id,
+              max_employees,
+              can_assign_roles,
+              can_assign_department,
+              can_assign_region,
+              can_add_custom_categories,
+              monthly_expense_limit
+            )
+          `)
           .eq('user_id', currentUser.id)
           .maybeSingle();
 
@@ -250,7 +264,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         let enrichedProfile = data;
 
-        if (enrichedProfile && !enrichedProfile.account) {
+        if (enrichedProfile && !(enrichedProfile as any).accounts) {
           const hasAccountId = Object.prototype.hasOwnProperty.call(enrichedProfile, 'account_id');
           const candidateAccountId = hasAccountId ? enrichedProfile.account_id : null;
 
@@ -286,7 +300,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                   can_add_custom_categories: accountRow.can_add_custom_categories,
                   monthly_expense_limit: accountRow.monthly_expense_limit ?? null,
                 });
-                enrichedProfile = { ...enrichedProfile, account: normalized, account_id: enrichedProfile.account_id ?? normalized.id };
+                (enrichedProfile as any).accounts = normalized;
+                enrichedProfile.account_id = enrichedProfile.account_id ?? normalized.id;
               }
             } catch (accountFetchError) {
               console.warn('[Auth] Failed to load related account', accountFetchError);
