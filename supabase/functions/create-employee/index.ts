@@ -432,17 +432,24 @@ serve(async (req) => {
   const accountIdentifier = accountId ?? account.id;
   const accountOwnerId = account?.owner_user_id ?? adminUser.id;
 
+  // CRITICAL: Los metadatos DEBEN incluir account_id para que el trigger handle_new_user
+  // identifique correctamente que es un empleado de una cuenta existente
   const userMetadata: Record<string, unknown> = {
     name,
     role: normalizedRole,
-    department: normalizedDepartment,
-    region: normalizedRegion,
+    account_id: accountIdentifier, // Siempre incluir account_id
     account_owner_id: accountOwnerId,
   };
 
-  if (accountIdentifier) {
-    userMetadata.account_id = accountIdentifier;
+  // Solo agregar department y region si están permitidos por el plan
+  if (normalizedDepartment) {
+    userMetadata.department = normalizedDepartment;
   }
+  if (normalizedRegion) {
+    userMetadata.region = normalizedRegion;
+  }
+
+  console.log('[create-employee] Creating user with metadata:', JSON.stringify(userMetadata));
 
   const createResponse = await adminClient.auth.admin.createUser({
     email,
@@ -467,13 +474,15 @@ serve(async (req) => {
     const inviteMetadata: Record<string, unknown> = {
       name,
       role: normalizedRole,
-      department: normalizedDepartment,
-      region: normalizedRegion,
+      account_id: accountIdentifier, // Siempre incluir
       account_owner_id: accountOwnerId,
     };
 
-    if (accountIdentifier) {
-      inviteMetadata.account_id = accountIdentifier;
+    if (normalizedDepartment) {
+      inviteMetadata.department = normalizedDepartment;
+    }
+    if (normalizedRegion) {
+      inviteMetadata.region = normalizedRegion;
     }
 
     console.log('[create-employee] Sending invite email to:', email, 'with redirect:', inviteRedirectTo);
