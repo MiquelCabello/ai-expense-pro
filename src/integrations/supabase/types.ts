@@ -14,6 +14,38 @@ export type Database = {
   }
   public: {
     Tables: {
+      account_departments: {
+        Row: {
+          account_id: string
+          created_at: string
+          id: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          account_id: string
+          created_at?: string
+          id?: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          account_id?: string
+          created_at?: string
+          id?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "account_departments_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       accounts: {
         Row: {
           can_add_custom_categories: boolean
@@ -21,9 +53,11 @@ export type Database = {
           can_assign_region: boolean
           can_assign_roles: boolean
           created_at: string
+          department_admin_limit: number | null
+          global_admin_limit: number | null
           id: string
-          monthly_expense_limit: number | null
           max_employees: number | null
+          monthly_expense_limit: number | null
           name: string
           owner_user_id: string
           plan: Database["public"]["Enums"]["account_plan"]
@@ -35,9 +69,11 @@ export type Database = {
           can_assign_region?: boolean
           can_assign_roles?: boolean
           created_at?: string
+          department_admin_limit?: number | null
+          global_admin_limit?: number | null
           id?: string
-          monthly_expense_limit?: number | null
           max_employees?: number | null
+          monthly_expense_limit?: number | null
           name: string
           owner_user_id: string
           plan?: Database["public"]["Enums"]["account_plan"]
@@ -49,27 +85,21 @@ export type Database = {
           can_assign_region?: boolean
           can_assign_roles?: boolean
           created_at?: string
+          department_admin_limit?: number | null
+          global_admin_limit?: number | null
           id?: string
-          monthly_expense_limit?: number | null
           max_employees?: number | null
+          monthly_expense_limit?: number | null
           name?: string
           owner_user_id?: string
           plan?: Database["public"]["Enums"]["account_plan"]
           updated_at?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "accounts_owner_user_id_fkey"
-            columns: ["owner_user_id"]
-            isOneToOne: true
-            referencedRelation: "users"
-            referencedColumns: ["id"]
-          }
-        ]
+        Relationships: []
       }
       audit_logs: {
         Row: {
-          account_id: string
+          account_id: string | null
           action: string
           actor_user_id: string
           created_at: string
@@ -80,7 +110,7 @@ export type Database = {
           metadata: Json | null
         }
         Insert: {
-          account_id: string
+          account_id?: string | null
           action: string
           actor_user_id: string
           created_at?: string
@@ -91,7 +121,7 @@ export type Database = {
           metadata?: Json | null
         }
         Update: {
-          account_id?: string
+          account_id?: string | null
           action?: string
           actor_user_id?: string
           created_at?: string
@@ -101,19 +131,11 @@ export type Database = {
           ip_address?: string | null
           metadata?: Json | null
         }
-        Relationships: [
-          {
-            foreignKeyName: "audit_logs_account_id_fkey"
-            columns: ["account_id"]
-            isOneToOne: false
-            referencedRelation: "accounts"
-            referencedColumns: ["id"]
-          }
-        ]
+        Relationships: []
       }
       categories: {
         Row: {
-          account_id: string
+          account_id: string | null
           budget_monthly: number | null
           created_at: string
           id: string
@@ -121,7 +143,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          account_id: string
+          account_id?: string | null
           budget_monthly?: number | null
           created_at?: string
           id?: string
@@ -129,33 +151,30 @@ export type Database = {
           updated_at?: string
         }
         Update: {
-          account_id?: string
+          account_id?: string | null
           budget_monthly?: number | null
           created_at?: string
           id?: string
           name?: string
           updated_at?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "categories_account_id_fkey"
-            columns: ["account_id"]
-            isOneToOne: false
-            referencedRelation: "accounts"
-            referencedColumns: ["id"]
-          }
-        ]
+        Relationships: []
       }
       expenses: {
         Row: {
-          account_id: string
+          account_id: string | null
           amount_gross: number
           amount_net: number
           approved_at: string | null
           approver_id: string | null
           category_id: string
+          classification_path: string | null
           created_at: string
           currency: string
+          doc_type: Database["public"]["Enums"]["expense_doc_type"] | null
+          doc_type_source:
+            | Database["public"]["Enums"]["classification_source"]
+            | null
           employee_id: string
           expense_date: string
           hash_dedupe: string
@@ -169,17 +188,23 @@ export type Database = {
           status: Database["public"]["Enums"]["expense_status"]
           tax_vat: number | null
           updated_at: string
+          user_id: string | null
           vendor: string
         }
         Insert: {
-          account_id: string
+          account_id?: string | null
           amount_gross: number
           amount_net: number
           approved_at?: string | null
           approver_id?: string | null
           category_id: string
+          classification_path?: string | null
           created_at?: string
           currency?: string
+          doc_type?: Database["public"]["Enums"]["expense_doc_type"] | null
+          doc_type_source?:
+            | Database["public"]["Enums"]["classification_source"]
+            | null
           employee_id: string
           expense_date: string
           hash_dedupe: string
@@ -193,17 +218,23 @@ export type Database = {
           status?: Database["public"]["Enums"]["expense_status"]
           tax_vat?: number | null
           updated_at?: string
+          user_id?: string | null
           vendor: string
         }
         Update: {
-          account_id?: string
+          account_id?: string | null
           amount_gross?: number
           amount_net?: number
           approved_at?: string | null
           approver_id?: string | null
           category_id?: string
+          classification_path?: string | null
           created_at?: string
           currency?: string
+          doc_type?: Database["public"]["Enums"]["expense_doc_type"] | null
+          doc_type_source?:
+            | Database["public"]["Enums"]["classification_source"]
+            | null
           employee_id?: string
           expense_date?: string
           hash_dedupe?: string
@@ -217,6 +248,7 @@ export type Database = {
           status?: Database["public"]["Enums"]["expense_status"]
           tax_vat?: number | null
           updated_at?: string
+          user_id?: string | null
           vendor?: string
         }
         Relationships: [
@@ -225,13 +257,6 @@ export type Database = {
             columns: ["category_id"]
             isOneToOne: false
             referencedRelation: "categories"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "expenses_account_id_fkey"
-            columns: ["account_id"]
-            isOneToOne: false
-            referencedRelation: "accounts"
             referencedColumns: ["id"]
           },
           {
@@ -245,14 +270,14 @@ export type Database = {
             foreignKeyName: "expenses_receipt_file_id_fkey"
             columns: ["receipt_file_id"]
             isOneToOne: false
-            referencedRelation: "files"
+            referencedRelation: "receipt_files"
             referencedColumns: ["id"]
           },
         ]
       }
       files: {
         Row: {
-          account_id: string
+          account_id: string | null
           checksum_sha256: string
           created_at: string
           id: string
@@ -264,7 +289,7 @@ export type Database = {
           uploaded_by: string
         }
         Insert: {
-          account_id: string
+          account_id?: string | null
           checksum_sha256: string
           created_at?: string
           id?: string
@@ -276,7 +301,7 @@ export type Database = {
           uploaded_by: string
         }
         Update: {
-          account_id?: string
+          account_id?: string | null
           checksum_sha256?: string
           created_at?: string
           id?: string
@@ -287,21 +312,14 @@ export type Database = {
           storage_key?: string
           uploaded_by?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "files_account_id_fkey"
-            columns: ["account_id"]
-            isOneToOne: false
-            referencedRelation: "accounts"
-            referencedColumns: ["id"]
-          }
-        ]
+        Relationships: []
       }
       profiles: {
         Row: {
-          account_id: string
+          account_id: string | null
           created_at: string
           department: string | null
+          department_id: string | null
           id: string
           name: string
           region: string | null
@@ -311,9 +329,10 @@ export type Database = {
           user_id: string
         }
         Insert: {
-          account_id: string
+          account_id?: string | null
           created_at?: string
           department?: string | null
+          department_id?: string | null
           id?: string
           name: string
           region?: string | null
@@ -323,9 +342,10 @@ export type Database = {
           user_id: string
         }
         Update: {
-          account_id?: string
+          account_id?: string | null
           created_at?: string
           department?: string | null
+          department_id?: string | null
           id?: string
           name?: string
           region?: string | null
@@ -341,12 +361,19 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "accounts"
             referencedColumns: ["id"]
-          }
+          },
+          {
+            foreignKeyName: "profiles_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "account_departments"
+            referencedColumns: ["id"]
+          },
         ]
       }
       project_codes: {
         Row: {
-          account_id: string
+          account_id: string | null
           code: string
           created_at: string
           id: string
@@ -355,7 +382,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          account_id: string
+          account_id?: string | null
           code: string
           created_at?: string
           id?: string
@@ -364,7 +391,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
-          account_id?: string
+          account_id?: string | null
           code?: string
           created_at?: string
           id?: string
@@ -372,14 +399,84 @@ export type Database = {
           status?: Database["public"]["Enums"]["project_status"]
           updated_at?: string
         }
+        Relationships: []
+      }
+      receipt_files: {
+        Row: {
+          created_at: string
+          id: string
+          mime_type: string | null
+          original_name: string | null
+          path: string
+          size: number | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          mime_type?: string | null
+          original_name?: string | null
+          path: string
+          size?: number | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          mime_type?: string | null
+          original_name?: string | null
+          path?: string
+          size?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          account_id: string
+          created_at: string
+          created_by: string | null
+          department_id: string | null
+          id: string
+          role: Database["public"]["Enums"]["user_role_type"]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          account_id: string
+          created_at?: string
+          created_by?: string | null
+          department_id?: string | null
+          id?: string
+          role: Database["public"]["Enums"]["user_role_type"]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          account_id?: string
+          created_at?: string
+          created_by?: string | null
+          department_id?: string | null
+          id?: string
+          role?: Database["public"]["Enums"]["user_role_type"]
+          updated_at?: string
+          user_id?: string
+        }
         Relationships: [
           {
-            foreignKeyName: "project_codes_account_id_fkey"
+            foreignKeyName: "user_roles_account_id_fkey"
             columns: ["account_id"]
             isOneToOne: false
             referencedRelation: "accounts"
             referencedColumns: ["id"]
-          }
+          },
+          {
+            foreignKeyName: "user_roles_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "account_departments"
+            referencedColumns: ["id"]
+          },
         ]
       }
     }
@@ -387,33 +484,80 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      check_plan_limits: {
+        Args: { _account_id: string; _limit_type: string }
+        Returns: number
+      }
+      check_user_role: {
+        Args: {
+          _account_id: string
+          _role: Database["public"]["Enums"]["user_role_type"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
+      current_postgres_version: {
+        Args: Record<PropertyKey, never>
+        Returns: string
+      }
+      get_account_id: {
+        Args: { _uid: string }
+        Returns: string
+      }
+      get_account_plan: {
+        Args: { _account_id: string }
+        Returns: Database["public"]["Enums"]["account_plan"]
+      }
+      get_user_department: {
+        Args: { _account_id: string; _user_id: string }
+        Returns: string
+      }
+      is_account_admin: {
+        Args: { _uid: string }
+        Returns: boolean
+      }
       is_admin: {
         Args: { _uid: string }
         Returns: boolean
       }
-      is_master_user: {
+      is_any_admin: {
+        Args: { _account_id: string; _user_id: string }
+        Returns: boolean
+      }
+      is_leaked_password_protection_enabled: {
         Args: Record<PropertyKey, never>
+        Returns: boolean
+      }
+      is_master_user: {
+        Args: { _email: string } | { _uid: string }
         Returns: boolean
       }
       plan_settings: {
         Args: { _plan: Database["public"]["Enums"]["account_plan"] }
         Returns: {
-          max_employees: number | null
-          can_assign_roles: boolean
+          can_add_custom_categories: boolean
           can_assign_department: boolean
           can_assign_region: boolean
-          can_add_custom_categories: boolean
-          monthly_expense_limit: number | null
+          can_assign_roles: boolean
+          max_employees: number
+          monthly_expense_limit: number
         }[]
       }
     }
     Enums: {
       account_plan: "FREE" | "PROFESSIONAL" | "ENTERPRISE"
+      classification_source: "ai" | "user" | "db-fallback"
+      expense_doc_type: "ticket" | "invoice"
       expense_source: "MANUAL" | "AI_EXTRACTED"
       expense_status: "PENDING" | "APPROVED" | "REJECTED"
       payment_method: "CARD" | "CASH" | "TRANSFER" | "OTHER"
       project_status: "ACTIVE" | "INACTIVE"
-      user_role: "ADMIN" | "EMPLOYEE"
+      user_role: "ADMIN" | "EMPLOYEE" | "DEPARTMENT_ADMIN"
+      user_role_type:
+        | "account_owner"
+        | "account_admin"
+        | "department_admin"
+        | "employee"
       user_status: "ACTIVE" | "INACTIVE"
     }
     CompositeTypes: {
@@ -542,11 +686,20 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      account_plan: ["FREE", "PROFESSIONAL", "ENTERPRISE"],
+      classification_source: ["ai", "user", "db-fallback"],
+      expense_doc_type: ["ticket", "invoice"],
       expense_source: ["MANUAL", "AI_EXTRACTED"],
       expense_status: ["PENDING", "APPROVED", "REJECTED"],
       payment_method: ["CARD", "CASH", "TRANSFER", "OTHER"],
       project_status: ["ACTIVE", "INACTIVE"],
-      user_role: ["ADMIN", "EMPLOYEE"],
+      user_role: ["ADMIN", "EMPLOYEE", "DEPARTMENT_ADMIN"],
+      user_role_type: [
+        "account_owner",
+        "account_admin",
+        "department_admin",
+        "employee",
+      ],
       user_status: ["ACTIVE", "INACTIVE"],
     },
   },
