@@ -28,7 +28,7 @@ interface Employee {
   id: string;
   user_id: string;
   name: string;
-  role: 'ADMIN' | 'EMPLOYEE';
+  role: 'ADMIN' | 'EMPLOYEE' | 'DEPARTMENT_ADMIN';
   department?: string | null;
   region?: string | null;
   status: 'ACTIVE' | 'INACTIVE';
@@ -82,6 +82,11 @@ export default function EmployeesPage() {
 
       if (accountId) {
         query = query.eq('account_id', accountId);
+      }
+
+      // Excluir al usuario actual (owner/admin) de la lista
+      if (profile?.user_id) {
+        query = query.neq('user_id', profile.user_id);
       }
 
       const { data, error } = await query;

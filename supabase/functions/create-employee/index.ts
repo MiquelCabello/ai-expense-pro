@@ -476,12 +476,19 @@ serve(async (req) => {
       inviteMetadata.account_id = accountIdentifier;
     }
 
-    await adminClient.auth.admin.inviteUserByEmail(email, {
+    console.log('[create-employee] Sending invite email to:', email, 'with redirect:', inviteRedirectTo);
+    const inviteResult = await adminClient.auth.admin.inviteUserByEmail(email, {
       data: inviteMetadata,
       redirectTo: inviteRedirectTo ?? undefined,
     });
+    
+    if (inviteResult.error) {
+      console.error('[create-employee] Failed to send invite email:', inviteResult.error);
+    } else {
+      console.log('[create-employee] Invite email sent successfully to:', email);
+    }
   } catch (error) {
-    console.warn('Failed to send invite email', error);
+    console.error('[create-employee] Exception sending invite email:', error);
   }
 
   return new Response(JSON.stringify({
