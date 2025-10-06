@@ -50,6 +50,13 @@ export default function EmployeesPage() {
     status: 'ACTIVE' as 'ACTIVE' | 'INACTIVE'
   });
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
+  const [editForm, setEditForm] = useState({
+    name: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
 
   const accountId = profile?.account_id ?? null;
   const maxEmployees = account?.max_employees ?? null;
@@ -211,6 +218,111 @@ export default function EmployeesPage() {
       fetchEmployees();
     } catch (error) {
       toast.error('Error actualizando estado del empleado');
+    }
+  };
+
+  const handleOpenEditDialog = (employee: Employee) => {
+    setEditingEmployee(employee);
+    setEditForm({
+      name: employee.name,
+      newPassword: '',
+      confirmPassword: ''
+    });
+    setIsEditDialogOpen(true);
+  };
+
+  const handleUpdateEmployee = async () => {
+    if (!editingEmployee || !accountId) return;
+
+    if (!editForm.name.trim()) {
+      toast.error('El nombre no puede estar vacío');
+      return;
+    }
+
+    if (editForm.newPassword && editForm.newPassword !== editForm.confirmPassword) {
+      toast.error('Las contraseñas no coinciden');
+      return;
+    }
+
+    if (editForm.newPassword && editForm.newPassword.length < 8) {
+      toast.error('La contraseña debe tener al menos 8 caracteres');
+      return;
+    }
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) {
+        throw new Error('No hay sesión activa');
+      }
+
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-employee`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          action: 'update',
+          employeeUserId: editingEmployee.user_id,
+          name: editForm.name.trim(),
+          password: editForm.newPassword || undefined
+        })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Error actualizando empleado');
+      }
+
+      toast.success('Empleado actualizado correctamente');
+      setIsEditDialogOpen(false);
+      setEditingEmployee(null);
+      fetchEmployees();
+    } catch (error) {
+      console.error('Error updating employee:', error);
+      toast.error(error instanceof Error ? error.message : 'Error actualizando empleado');
+    }
+  };
+
+  const handleDeleteEmployee = async () => {
+    if (!editingEmployee || !accountId) return;
+
+    if (!confirm(`¿Estás seguro de que quieres eliminar a ${editingEmployee.name}? Esta acción no se puede deshacer.`)) {
+      return;
+    }
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) {
+        throw new Error('No hay sesión activa');
+      }
+
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-employee`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          action: 'delete',
+          employeeUserId: editingEmployee.user_id
+        })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Error eliminando empleado');
+      }
+
+      toast.success('Empleado eliminado correctamente');
+      setIsEditDialogOpen(false);
+      setEditingEmployee(null);
+      fetchEmployees();
+    } catch (error) {
+      console.error('Error deleting employee:', error);
+      toast.error(error instanceof Error ? error.message : 'Error eliminando empleado');
     }
   };
 
@@ -475,7 +587,11 @@ export default function EmployeesPage() {
                           </>
                         )}
                       </Button>
-                      <Button variant="outline" size="sm">
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => handleOpenEditDialog(employee)}
+                      >
                         <Edit className="h-3 w-3 mr-1" />
                         Editar
                       </Button>
@@ -508,6 +624,69 @@ export default function EmployeesPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Edit Employee Dialog */}
+        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Editar Empleado</DialogTitle>
+              <DialogDescription>
+                Modifica los datos de {editingEmployee?.name}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-name">Nombre Completo</Label>
+                <Input
+                  id="edit-name"
+                  value={editForm.name}
+                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                  placeholder="Nombre del empleado"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-password">Nueva Contraseña (opcional)</Label>
+                <Input
+                  id="edit-password"
+                  type="password"
+                  value={editForm.newPassword}
+                  onChange={(e) => setEditForm({ ...editForm, newPassword: e.target.value })}
+                  placeholder="Dejar vacío para mantener la actual"
+                />
+              </div>
+              {editForm.newPassword && (
+                <div className="space-y-2">
+                  <Label htmlFor="edit-confirm-password">Confirmar Nueva Contraseña</Label>
+                  <Input
+                    id="edit-confirm-password"
+                    type="password"
+                    value={editForm.confirmPassword}
+                    onChange={(e) => setEditForm({ ...editForm, confirmPassword: e.target.value })}
+                    placeholder="Confirmar contraseña"
+                  />
+                </div>
+              )}
+              <div className="flex justify-between gap-2 pt-4">
+                <Button 
+                  variant="destructive" 
+                  onClick={handleDeleteEmployee}
+                  className="gap-2"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Eliminar
+                </Button>
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+                    Cancelar
+                  </Button>
+                  <Button onClick={handleUpdateEmployee} className="bg-gradient-primary hover:opacity-90">
+                    Guardar Cambios
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </AppLayout>
   );
