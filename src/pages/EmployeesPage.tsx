@@ -44,7 +44,7 @@ export default function EmployeesPage() {
   const [newEmployee, setNewEmployee] = useState({
     name: '',
     email: '',
-    role: 'EMPLOYEE' as 'ADMIN' | 'EMPLOYEE',
+    role: 'EMPLOYEE' as 'ADMIN' | 'EMPLOYEE' | 'DEPARTMENT_ADMIN',
     department: '',
     region: '',
     status: 'ACTIVE' as 'ACTIVE' | 'INACTIVE'
@@ -327,12 +327,23 @@ export default function EmployeesPage() {
   };
 
   const getRoleBadge = (role: string) => {
-    return role === 'ADMIN' ? (
-      <Badge variant="default" className="gap-1">
-        <UserCheck className="h-3 w-3" />
-        Administrador
-      </Badge>
-    ) : (
+    if (role === 'ADMIN') {
+      return (
+        <Badge variant="default" className="gap-1">
+          <UserCheck className="h-3 w-3" />
+          Administrador
+        </Badge>
+      );
+    }
+    if (role === 'DEPARTMENT_ADMIN') {
+      return (
+        <Badge variant="outline" className="gap-1 border-primary text-primary">
+          <Briefcase className="h-3 w-3" />
+          Admin Departamento
+        </Badge>
+      );
+    }
+    return (
       <Badge variant="secondary" className="gap-1">
         <Users className="h-3 w-3" />
         Empleado
@@ -449,18 +460,31 @@ export default function EmployeesPage() {
                     placeholder="correo@empresa.com"
                   />
                 </div>
-                {canAssignRoles && (
+                {(canAssignRoles || account?.plan === 'PROFESSIONAL') && (
                   <div className="space-y-2">
                     <Label htmlFor="role">Rol</Label>
-                    <Select value={newEmployee.role} onValueChange={(value: 'ADMIN' | 'EMPLOYEE') => setNewEmployee({ ...newEmployee, role: value })}>
+                    <Select 
+                      value={newEmployee.role} 
+                      onValueChange={(value: 'ADMIN' | 'EMPLOYEE' | 'DEPARTMENT_ADMIN') => setNewEmployee({ ...newEmployee, role: value })}
+                    >
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="EMPLOYEE">Empleado</SelectItem>
-                        <SelectItem value="ADMIN">Administrador</SelectItem>
+                        {(account?.plan === 'PROFESSIONAL' || account?.plan === 'ENTERPRISE') && canAssignDepartment && (
+                          <SelectItem value="DEPARTMENT_ADMIN">Administrador de Departamento</SelectItem>
+                        )}
+                        {account?.plan === 'ENTERPRISE' && canAssignRoles && (
+                          <SelectItem value="ADMIN">Administrador Global</SelectItem>
+                        )}
                       </SelectContent>
                     </Select>
+                    {newEmployee.role === 'DEPARTMENT_ADMIN' && (
+                      <p className="text-xs text-muted-foreground">
+                        Puede gestionar y ver gastos de su departamento. Límite: 2 en plan Professional.
+                      </p>
+                    )}
                   </div>
                 )}
                 {(canAssignDepartment || canAssignRegion) && (
