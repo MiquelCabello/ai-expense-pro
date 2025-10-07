@@ -380,14 +380,20 @@ serve(async (req) => {
   const normalizedDepartment = account.can_assign_department ? (rawDepartment || null) : null;
   const normalizedRegion = account.can_assign_region ? (rawRegion || null) : null;
 
+  // Build redirect URL prioritizing deployed URLs over preview
   const redirectCandidates: string[] = [];
   const rawRedirect = typeof payload.redirectTo === 'string' ? payload.redirectTo.trim() : '';
   if (rawRedirect.length > 0) {
     redirectCandidates.push(rawRedirect);
   }
+  
+  // Add production domain first (higher priority)
+  redirectCandidates.push('https://ai-expense-pro.vercel.app/accept-invite');
+  
   if (inviteRedirectEnv) {
     redirectCandidates.push(inviteRedirectEnv);
   }
+  
   const requestOrigin = req.headers.get('origin');
   if (requestOrigin) {
     try {
@@ -400,7 +406,9 @@ serve(async (req) => {
   let inviteRedirectTo: string | null = null;
   for (const candidate of redirectCandidates) {
     try {
-      inviteRedirectTo = new URL(candidate).toString();
+      const url = new URL(candidate);
+      inviteRedirectTo = url.toString();
+      console.log('[create-employee] Selected redirect URL:', inviteRedirectTo);
       break;
     } catch (error) {
       console.warn('[create-employee] skipped invalid redirect URL candidate', candidate, error);
@@ -564,8 +572,8 @@ serve(async (req) => {
       inviteMetadata.region = normalizedRegion;
     }
 
-    // Ensure redirect goes to accept-invite page
-    const finalRedirectTo = inviteRedirectTo || `${requestOrigin || supabaseUrl}/accept-invite`;
+    // Use the selected redirect URL or fallback to production domain
+    const finalRedirectTo = inviteRedirectTo || 'https://ai-expense-pro.vercel.app/accept-invite';
     
     console.log('[create-employee] Sending invite email to:', email, 'with redirect:', finalRedirectTo);
     const inviteResult = await adminClient.auth.admin.inviteUserByEmail(email, {
