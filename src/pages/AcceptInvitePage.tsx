@@ -52,37 +52,38 @@ export default function AcceptInvitePage() {
   useEffect(() => {
     const initializeSession = async () => {
       try {
+        console.log('[AcceptInvite] Initializing session with params:', Object.fromEntries(params.entries()));
+        
         const accessToken = params.get('access_token');
         const refreshToken = params.get('refresh_token');
-        const code = params.get('code');
-        const tokenHash = params.get('token_hash');
         const type = params.get('type');
-
-        if (accessToken && refreshToken) {
-          const { error } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken,
-          });
-          if (error) throw error;
-        } else if (code) {
-          const { error } = await supabase.auth.exchangeCodeForSession(code);
-          if (error) throw error;
-        } else if (tokenHash && type === 'invite') {
-          const { error } = await supabase.auth.verifyOtp({
-            token_hash: tokenHash,
-            type: 'invite',
-          });
-          if (error) throw error;
+        
+        // Check if this is an invite link
+        if (type === 'invite' || (accessToken && refreshToken)) {
+          console.log('[AcceptInvite] Processing invite link');
+          
+          if (accessToken && refreshToken) {
+            const { data, error } = await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken,
+            });
+            
+            if (error) {
+              console.error('[AcceptInvite] Session error:', error);
+              throw error;
+            }
+            
+            console.log('[AcceptInvite] Session established:', data.user?.email);
+            setEmail(data.user?.email ?? null);
+            setInitialError(null);
+          } else {
+            throw new Error('Parámetros de invitación incompletos. Por favor, solicita un nuevo enlace.');
+          }
         } else {
-          throw new Error('Enlace de invitación inválido o caducado. Solicita una nueva invitación.');
+          throw new Error('Enlace de invitación inválido. Por favor, solicita un nuevo enlace.');
         }
-
-        const { data: userData, error: userError } = await supabase.auth.getUser();
-        if (userError) throw userError;
-        setEmail(userData.user?.email ?? null);
-        setInitialError(null);
       } catch (error: any) {
-        console.error('[AcceptInvite] unable to establish session', error);
+        console.error('[AcceptInvite] Unable to establish session:', error);
         setInitialError(error?.message ?? 'No hemos podido validar esta invitación.');
       } finally {
         setLoading(false);
