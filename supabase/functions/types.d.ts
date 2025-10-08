@@ -15,8 +15,8 @@ declare module "https://deno.land/std@0.168.0/http/server.ts" {
   ): Promise<void>
 }
 
-declare const Deno: {
-  env: {
+declare namespace Deno {
+  export const env: {
     get(name: string): string | undefined
   }
 }
