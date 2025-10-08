@@ -491,13 +491,50 @@ serve(async (req) => {
     userMetadata.region = normalizedRegion;
   }
 
-  console.log('[create-employee] Creating user with metadata:', JSON.stringify(userMetadata));
+  console.log('[create-employee] Creating invitation for:', email);
 
-  const createResponse = await adminClient.auth.admin.createUser({
-    email,
-    email_confirm: false,
-    user_metadata: userMetadata,
-    app_metadata: {
+  // Instead of creating user immediately, create an invitation record
+  const { data: invitation, error: invitationError } = await adminClient
+    .from('invitations')
+    .insert({
+      email,
+      name,
+      role: normalizedRole,
+      department: normalizedDepartment,
+      region: normalizedRegion,
+      account_id: accountIdentifier,
+      created_by: adminUser.id,
+      expires_at: null, // Never expires
+    })
+    .select('id, token')
+    .single();
+
+  if (invitationError || !invitation) {
+    console.error('[create-employee] Failed to create invitation:', invitationError);
+    return new Response(JSON.stringify({ error: 'invitation_creation_failed' }), {
+      status: 500,
+      headers: jsonHeaders,
+    });
+  }
+
+  console.log('[create-employee] Invitation created with token:', invitation.token);
+
+  // Generate invitation URL
+  const inviteUrl = `https://ai-expense-pro.vercel.app/accept-invite?token=${invitation.token}`;
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      invitation_id: invitation.id,
+      invitation_url: inviteUrl,
+      message: 'invitation_created',
+    }),
+    {
+      status: 200,
+      headers: jsonHeaders,
+    }
+  );
+});
       roles: [normalizedRole],
     },
   });

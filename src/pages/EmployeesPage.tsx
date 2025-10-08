@@ -20,7 +20,8 @@ import {
   Edit,
   Trash2,
   UserCheck,
-  UserX
+  UserX,
+  Copy
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -57,6 +58,8 @@ export default function EmployeesPage() {
     newPassword: '',
     confirmPassword: ''
   });
+  const [invitationUrl, setInvitationUrl] = useState<string | null>(null);
+  const [showInvitationDialog, setShowInvitationDialog] = useState(false);
 
   const accountId = profile?.account_id ?? null;
   const maxEmployees = account?.max_employees ?? null;
@@ -186,7 +189,15 @@ export default function EmployeesPage() {
         throw new Error(message);
       }
 
-      toast.success('Invitación enviada al nuevo empleado');
+      const result = await response.json();
+      
+      // Show invitation URL
+      if (result.invitation_url) {
+        setInvitationUrl(result.invitation_url);
+        setShowInvitationDialog(true);
+      }
+
+      toast.success('Invitación creada exitosamente');
       setIsCreateDialogOpen(false);
       setNewEmployee({
         name: '',
@@ -708,6 +719,51 @@ export default function EmployeesPage() {
                   </Button>
                 </div>
               </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Invitation URL Dialog */}
+        <Dialog open={showInvitationDialog} onOpenChange={setShowInvitationDialog}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Link de Invitación Generado</DialogTitle>
+              <DialogDescription>
+                Copia este enlace y envíalo al nuevo empleado. El enlace no expira hasta que el usuario establezca su contraseña.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="flex items-center space-x-2">
+                <Input
+                  readOnly
+                  value={invitationUrl || ''}
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => {
+                    if (invitationUrl) {
+                      navigator.clipboard.writeText(invitationUrl);
+                      toast.success('Link copiado al portapapeles');
+                    }
+                  }}
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="text-sm text-muted-foreground">
+                <p>El empleado podrá usar este enlace para crear su contraseña y acceder a la plataforma.</p>
+              </div>
+              <Button
+                onClick={() => {
+                  setShowInvitationDialog(false);
+                  setInvitationUrl(null);
+                }}
+                className="w-full"
+              >
+                Cerrar
+              </Button>
             </div>
           </DialogContent>
         </Dialog>

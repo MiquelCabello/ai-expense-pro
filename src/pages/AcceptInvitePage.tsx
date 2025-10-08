@@ -1,102 +1,83 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { ArrowLeft, Lock, ShieldCheck, AlertCircle } from 'lucide-react';
-
-function collectAuthParams() {
-  if (typeof window === 'undefined') {
-    return new URLSearchParams();
-  }
-
-  const combined = new URLSearchParams();
-  const hash = window.location.hash.startsWith('#')
-    ? window.location.hash.slice(1)
-    : window.location.hash;
-  const search = window.location.search.startsWith('?')
-    ? window.location.search.slice(1)
-    : window.location.search;
-
-  if (hash) {
-    for (const [key, value] of new URLSearchParams(hash).entries()) {
-      combined.set(key, value);
-    }
-  }
-
-  if (search) {
-    for (const [key, value] of new URLSearchParams(search).entries()) {
-      if (!combined.has(key)) {
-        combined.set(key, value);
-      }
-    }
-  }
-
-  return combined;
-}
+import { Loader2, AlertCircle, ShieldCheck, Lock, ArrowLeft } from 'lucide-react';
 
 export default function AcceptInvitePage() {
-  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
-  const [initialError, setInitialError] = useState<string | null>(null);
-  const [email, setEmail] = useState<string | null>(null);
+  const [invitation, setInvitation] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [updating, setUpdating] = useState(false);
-
-  const params = useMemo(() => collectAuthParams(), []);
+  const [submitting, setSubmitting] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
-    const initializeSession = async () => {
+    const fetchInvitation = async () => {
+      const token = searchParams.get('token');
+
+      if (!token) {
+        setError('Token de invitación no proporcionado.');
+        setLoading(false);
+        return;
+      }
+
+      console.log('[AcceptInvite] Fetching invitation with token:', token);
+
       try {
-        console.log('[AcceptInvite] Initializing session with params:', Object.fromEntries(params.entries()));
-        
-        const accessToken = params.get('access_token');
-        const refreshToken = params.get('refresh_token');
-        const type = params.get('type');
-        
-        // Check if this is an invite link
-        if (type === 'invite' || (accessToken && refreshToken)) {
-          console.log('[AcceptInvite] Processing invite link');
-          
-          if (accessToken && refreshToken) {
-            const { data, error } = await supabase.auth.setSession({
-              access_token: accessToken,
-              refresh_token: refreshToken,
-            });
-            
-            if (error) {
-              console.error('[AcceptInvite] Session error:', error);
-              throw error;
-            }
-            
-            console.log('[AcceptInvite] Session established:', data.user?.email);
-            setEmail(data.user?.email ?? null);
-            setInitialError(null);
-          } else {
-            throw new Error('Parámetros de invitación incompletos. Por favor, solicita un nuevo enlace.');
-          }
-        } else {
-          throw new Error('Enlace de invitación inválido. Por favor, solicita un nuevo enlace.');
+        // Fetch invitation from public table
+        const { data, error: fetchError } = await supabase
+          .from('invitations')
+          .select('*')
+          .eq('token', token)
+          .is('used_at', null)
+          .maybeSingle();
+
+        if (fetchError) {
+          console.error('[AcceptInvite] Error fetching invitation:', fetchError);
+          setError('Error al validar la invitación.');
+          setLoading(false);
+          return;
         }
-      } catch (error: any) {
-        console.error('[AcceptInvite] Unable to establish session:', error);
-        setInitialError(error?.message ?? 'No hemos podido validar esta invitación.');
-      } finally {
+
+        if (!data) {
+          setError('Invitación no válida o ya utilizada.');
+          setLoading(false);
+          return;
+        }
+
+        // Check if expired
+        if (data.expires_at && new Date(data.expires_at) < new Date()) {
+          setError('Esta invitación ha expirado.');
+          setLoading(false);
+          return;
+        }
+
+        console.log('[AcceptInvite] Valid invitation found for:', data.email);
+        setInvitation(data);
+        setLoading(false);
+      } catch (err) {
+        console.error('[AcceptInvite] Unexpected error:', err);
+        setError('Error inesperado al procesar la invitación.');
         setLoading(false);
       }
     };
 
-    void initializeSession();
-  }, [params]);
+    fetchInvitation();
+  }, [searchParams]);
 
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
 
-    if (!password || password.length < 8) {
+    if (!invitation) return;
+
+    if (password.length < 8) {
       toast.error('La contraseña debe tener al menos 8 caracteres');
       return;
     }
@@ -106,33 +87,119 @@ export default function AcceptInvitePage() {
       return;
     }
 
-    setUpdating(true);
+    setSubmitting(true);
+
     try {
-      const { error } = await supabase.auth.updateUser({ password });
+      console.log('[AcceptInvite] Completing invitation...');
+
+      // Call edge function to complete invitation
+      const { data, error } = await supabase.functions.invoke('complete-invitation', {
+        body: {
+          token: invitation.token,
+          password: password,
+        },
+      });
+
       if (error) {
-        throw error;
+        console.error('[AcceptInvite] Error completing invitation:', error);
+        toast.error('No se pudo completar la invitación. Intenta de nuevo.');
+        setSubmitting(false);
+        return;
       }
 
-      toast.success('¡Contraseña configurada correctamente!');
+      if (!data.success) {
+        const errorMessage = data.error === 'user_already_exists' 
+          ? 'Ya existe una cuenta con este email.'
+          : data.error || 'Error al crear la cuenta.';
+        toast.error(errorMessage);
+        setSubmitting(false);
+        return;
+      }
+
+      console.log('[AcceptInvite] User created, establishing session...');
+
+      // If we got a session, set it
+      if (data.session) {
+        const { error: sessionError } = await supabase.auth.setSession({
+          access_token: data.session.access_token,
+          refresh_token: data.session.refresh_token,
+        });
+
+        if (sessionError) {
+          console.error('[AcceptInvite] Session error:', sessionError);
+        }
+      }
+
+      toast.success('¡Cuenta creada correctamente!');
+
+      // Navigate to upload page
       navigate('/upload');
-    } catch (error: any) {
-      console.error('[AcceptInvite] update password failed', error);
-      toast.error(error?.message ?? 'No hemos podido guardar tu contraseña');
-    } finally {
-      setUpdating(false);
+    } catch (err) {
+      console.error('[AcceptInvite] Unexpected error:', err);
+      toast.error('Error inesperado al completar la invitación.');
+      setSubmitting(false);
     }
   };
 
-  const handleBackToLogin = () => {
-    navigate('/auth');
-  };
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-primary-light via-background to-success-light flex items-center justify-center p-4">
+        <Card className="w-full max-w-md shadow-xl bg-gradient-card border-0">
+          <CardContent className="pt-6">
+            <div className="flex flex-col items-center justify-center py-8 space-y-4">
+              <Loader2 className="h-12 w-12 animate-spin text-primary" />
+              <p className="text-muted-foreground">Validando invitación...</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-primary-light via-background to-success-light flex items-center justify-center p-4">
+        <div className="w-full max-w-md">
+          <Button
+            variant="ghost"
+            onClick={() => navigate('/auth')}
+            className="mb-6 gap-2 hover:bg-background/50"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Volver al inicio de sesión
+          </Button>
+
+          <Card className="shadow-xl bg-gradient-card border-0">
+            <CardHeader className="text-center">
+              <div className="flex justify-center mb-4">
+                <AlertCircle className="h-16 w-16 text-warning" />
+              </div>
+              <CardTitle>Invitación no válida</CardTitle>
+              <CardDescription>{error}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground text-center">
+                Pide a tu administrador que te envíe un nuevo enlace de invitación.
+              </p>
+              <Button 
+                onClick={() => navigate('/auth')}
+                className="w-full"
+              >
+                Ir al login
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary-light via-background to-success-light flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <Button
           variant="ghost"
-          onClick={handleBackToLogin}
+          onClick={() => navigate('/auth')}
           className="mb-6 gap-2 hover:bg-background/50"
         >
           <ArrowLeft className="h-4 w-4" />
@@ -142,83 +209,70 @@ export default function AcceptInvitePage() {
         <Card className="shadow-xl bg-gradient-card border-0">
           <CardHeader className="text-center">
             <div className="flex justify-center mb-4">
-              {initialError ? (
-                <AlertCircle className="h-16 w-16 text-warning" />
-              ) : (
-                <ShieldCheck className="h-16 w-16 text-success" />
-              )}
+              <ShieldCheck className="h-16 w-16 text-success" />
             </div>
-            <CardTitle>{initialError ? 'Invitación no válida' : 'Completa tu acceso'}</CardTitle>
+            <CardTitle>Activar Cuenta</CardTitle>
             <CardDescription>
-              {initialError
-                ? initialError
-                : 'Define una contraseña segura para acceder a tu cuenta'}
+              Hola {invitation.name}, establece tu contraseña para acceder
             </CardDescription>
           </CardHeader>
-
           <CardContent>
-            {loading ? (
-              <div className="py-10 text-center text-muted-foreground">
-                Validando invitación...
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="text-sm text-muted-foreground text-center mb-4">
+                Estás configurando la cuenta <strong>{invitation.email}</strong>
               </div>
-            ) : initialError ? (
-              <div className="space-y-4">
-                <p className="text-sm text-muted-foreground text-center">
-                  Pide a tu administrador que te envíe un nuevo enlace de invitación.
-                </p>
-                <Button onClick={handleBackToLogin} className="w-full">
-                  Ir al login
-                </Button>
+
+              <div className="space-y-2">
+                <Label htmlFor="password">Nueva contraseña</Label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="password"
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Mínimo 8 caracteres"
+                    className="pl-10"
+                    required
+                    minLength={8}
+                    disabled={submitting}
+                  />
+                </div>
               </div>
-            ) : (
-              <form onSubmit={handleSubmit} className="space-y-4">
-                {email && (
-                  <div className="text-sm text-muted-foreground text-center">
-                    Estás configurando la cuenta <strong>{email}</strong>
-                  </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="confirmPassword">Confirmar contraseña</Label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="confirmPassword"
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Repite tu contraseña"
+                    className="pl-10"
+                    required
+                    minLength={8}
+                    disabled={submitting}
+                  />
+                </div>
+              </div>
+
+              <Button 
+                type="submit" 
+                className="w-full bg-gradient-primary hover:opacity-90"
+                disabled={submitting}
+              >
+                {submitting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Creando cuenta...
+                  </>
+                ) : (
+                  'Activar Cuenta'
                 )}
-
-                <div className="space-y-2">
-                  <Label htmlFor="password">Nueva contraseña</Label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="password"
-                      type="password"
-                      placeholder="••••••••"
-                      value={password}
-                      onChange={(event) => setPassword(event.target.value)}
-                      className="pl-10"
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="confirmPassword">Confirmar contraseña</Label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="confirmPassword"
-                      type="password"
-                      placeholder="••••••••"
-                      value={confirmPassword}
-                      onChange={(event) => setConfirmPassword(event.target.value)}
-                      className="pl-10"
-                      required
-                    />
-                  </div>
-                </div>
-
-                <Button
-                  type="submit"
-                  className="w-full bg-gradient-primary hover:opacity-90"
-                  disabled={updating}
-                >
-                  {updating ? 'Guardando...' : 'Guardar contraseña'}
-                </Button>
-              </form>
-            )}
+              </Button>
+            </form>
           </CardContent>
         </Card>
       </div>

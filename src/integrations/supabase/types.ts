@@ -314,6 +314,54 @@ export type Database = {
         }
         Relationships: []
       }
+      invitations: {
+        Row: {
+          account_id: string
+          created_at: string
+          created_by: string
+          department: string | null
+          email: string
+          expires_at: string | null
+          id: string
+          name: string
+          region: string | null
+          role: Database["public"]["Enums"]["user_role"]
+          token: string
+          updated_at: string
+          used_at: string | null
+        }
+        Insert: {
+          account_id: string
+          created_at?: string
+          created_by: string
+          department?: string | null
+          email: string
+          expires_at?: string | null
+          id?: string
+          name: string
+          region?: string | null
+          role?: Database["public"]["Enums"]["user_role"]
+          token?: string
+          updated_at?: string
+          used_at?: string | null
+        }
+        Update: {
+          account_id?: string
+          created_at?: string
+          created_by?: string
+          department?: string | null
+          email?: string
+          expires_at?: string | null
+          id?: string
+          name?: string
+          region?: string | null
+          role?: Database["public"]["Enums"]["user_role"]
+          token?: string
+          updated_at?: string
+          used_at?: string | null
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           account_id: string | null
@@ -507,6 +555,10 @@ export type Database = {
       get_account_plan: {
         Args: { _account_id: string }
         Returns: Database["public"]["Enums"]["account_plan"]
+      }
+      get_admin_count_for_account: {
+        Args: { p_account_id: string }
+        Returns: number
       }
       get_user_department: {
         Args: { _account_id: string; _user_id: string }
