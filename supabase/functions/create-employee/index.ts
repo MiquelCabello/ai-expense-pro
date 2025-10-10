@@ -363,22 +363,37 @@ serve(async (req) => {
     });
   }
 
-  const allowsAdminInvites = account.plan === 'ENTERPRISE' && account.can_assign_roles === true;
-  const requestedRole = payload.role === 'ADMIN' ? 'ADMIN' : 'EMPLOYEE';
-  const normalizedRole = allowsAdminInvites && requestedRole === 'ADMIN' ? 'ADMIN' : 'EMPLOYEE';
+  // Professional plans can have up to 2 department admins
+  const allowsDepartmentAdmins = (account.plan === 'PROFESSIONAL' || account.plan === 'ENTERPRISE') && account.can_assign_roles === true;
+  const allowsGlobalAdmins = account.plan === 'ENTERPRISE' && account.can_assign_roles === true;
+  
+  const requestedRole = payload.role || 'EMPLOYEE';
+  let normalizedRole = 'EMPLOYEE';
+  
+  if (allowsGlobalAdmins && requestedRole === 'ADMIN') {
+    normalizedRole = 'ADMIN';
+  } else if (allowsDepartmentAdmins && requestedRole === 'DEPARTMENT_ADMIN') {
+    normalizedRole = 'EMPLOYEE'; // Still EMPLOYEE in profiles table
+  }
   const rawDepartment = typeof payload.department === 'string' ? payload.department.trim() : '';
   const rawRegion = typeof payload.region === 'string' ? payload.region.trim() : '';
   const normalizedDepartment = account.can_assign_department ? (rawDepartment || null) : null;
   const normalizedRegion = account.can_assign_region ? (rawRegion || null) : null;
 
+  // Build redirect URL prioritizing deployed URLs over preview
   const redirectCandidates: string[] = [];
   const rawRedirect = typeof payload.redirectTo === 'string' ? payload.redirectTo.trim() : '';
   if (rawRedirect.length > 0) {
     redirectCandidates.push(rawRedirect);
   }
+  
+  // Add production domain first (higher priority)
+  redirectCandidates.push('https://ai-expense-pro.vercel.app/accept-invite');
+  
   if (inviteRedirectEnv) {
     redirectCandidates.push(inviteRedirectEnv);
   }
+  
   const requestOrigin = req.headers.get('origin');
   if (requestOrigin) {
     try {
@@ -391,7 +406,9 @@ serve(async (req) => {
   let inviteRedirectTo: string | null = null;
   for (const candidate of redirectCandidates) {
     try {
-      inviteRedirectTo = new URL(candidate).toString();
+      const url = new URL(candidate);
+      inviteRedirectTo = url.toString();
+      console.log('[create-employee] Selected redirect URL:', inviteRedirectTo);
       break;
     } catch (error) {
       console.warn('[create-employee] skipped invalid redirect URL candidate', candidate, error);
@@ -432,64 +449,89 @@ serve(async (req) => {
   const accountIdentifier = accountId ?? account.id;
   const accountOwnerId = account?.owner_user_id ?? adminUser.id;
 
+  // Check department admin limit for Professional plans
+  if (requestedRole === 'DEPARTMENT_ADMIN' && allowsDepartmentAdmins) {
+    const { count: departmentAdminCount, error: countError } = await adminClient
+      .from('user_roles')
+      .select('id', { count: 'exact', head: true })
+      .eq('account_id', accountIdentifier)
+      .eq('role', 'department_admin');
+
+    if (countError) {
+      console.error('[create-employee] Failed to count department admins', countError);
+      return new Response(JSON.stringify({ error: 'count_failed' }), {
+        status: 500,
+        headers: jsonHeaders,
+      });
+    }
+
+    const maxDepartmentAdmins = account.plan === 'PROFESSIONAL' ? 2 : null;
+    if (maxDepartmentAdmins !== null && (departmentAdminCount ?? 0) >= maxDepartmentAdmins) {
+      return new Response(JSON.stringify({ error: 'DEPARTMENT_ADMIN_LIMIT_REACHED' }), {
+        status: 409,
+        headers: jsonHeaders,
+      });
+    }
+  }
+
+  // CRITICAL: Los metadatos DEBEN incluir account_id para que el trigger handle_new_user
+  // identifique correctamente que es un empleado de una cuenta existente
   const userMetadata: Record<string, unknown> = {
     name,
     role: normalizedRole,
-    department: normalizedDepartment,
-    region: normalizedRegion,
+    account_id: accountIdentifier, // Siempre incluir account_id
     account_owner_id: accountOwnerId,
   };
 
-  if (accountIdentifier) {
-    userMetadata.account_id = accountIdentifier;
+  // Solo agregar department y region si están permitidos por el plan
+  if (normalizedDepartment) {
+    userMetadata.department = normalizedDepartment;
+  }
+  if (normalizedRegion) {
+    userMetadata.region = normalizedRegion;
   }
 
-  const createResponse = await adminClient.auth.admin.createUser({
-    email,
-    email_confirm: false,
-    user_metadata: userMetadata,
-    app_metadata: {
-      roles: [normalizedRole],
-    },
-  });
+  console.log('[create-employee] Creating invitation for:', email);
 
-  if (createResponse.error) {
-    const code = createResponse.error.message?.includes('already registered') ? 409 : 400;
-    return new Response(JSON.stringify({ error: createResponse.error.message || 'create_failed' }), {
-      status: code,
-      headers: jsonHeaders,
-    });
-  }
-
-  const createdUser = createResponse.data.user;
-
-  try {
-    const inviteMetadata: Record<string, unknown> = {
+  // Instead of creating user immediately, create an invitation record
+  const { data: invitation, error: invitationError } = await adminClient
+    .from('invitations')
+    .insert({
+      email,
       name,
       role: normalizedRole,
       department: normalizedDepartment,
       region: normalizedRegion,
-      account_owner_id: accountOwnerId,
-    };
+      account_id: accountIdentifier,
+      created_by: adminUser.id,
+      expires_at: null, // Never expires
+    })
+    .select('id, token')
+    .single();
 
-    if (accountIdentifier) {
-      inviteMetadata.account_id = accountIdentifier;
-    }
-
-    await adminClient.auth.admin.inviteUserByEmail(email, {
-      data: inviteMetadata,
-      redirectTo: inviteRedirectTo ?? undefined,
+  if (invitationError || !invitation) {
+    console.error('[create-employee] Failed to create invitation:', invitationError);
+    return new Response(JSON.stringify({ error: 'invitation_creation_failed' }), {
+      status: 500,
+      headers: jsonHeaders,
     });
-  } catch (error) {
-    console.warn('Failed to send invite email', error);
   }
 
-  return new Response(JSON.stringify({
-    success: true,
-    user_id: createdUser?.id ?? null,
-    message: 'employee_created',
-  }), {
-    status: 200,
-    headers: jsonHeaders,
-  });
+  console.log('[create-employee] Invitation created with token:', invitation.token);
+
+  // Generate invitation URL
+  const inviteUrl = `https://ai-expense-pro.vercel.app/accept-invite?token=${invitation.token}`;
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      invitation_id: invitation.id,
+      invitation_url: inviteUrl,
+      message: 'invitation_created',
+    }),
+    {
+      status: 200,
+      headers: jsonHeaders,
+    }
+  );
 });

@@ -20,7 +20,7 @@ export default function CompanySummaryCard({ account, profile, planDisplay, acti
 
   return (
     <Card className="bg-card border border-border">
-      <CardHeader className="flex flex-col md:flex-row md:items-center md:justify-between">
+      <CardHeader>
         <div className="flex items-center gap-4">
           <div className="bg-gradient-primary text-primary-foreground p-3 rounded-xl">
             <Building2 className="h-6 w-6" />
@@ -30,7 +30,6 @@ export default function CompanySummaryCard({ account, profile, planDisplay, acti
             <CardDescription>{planDisplay} · {maxEmployees ? `${activeEmployees}/${maxEmployees} usuarios activos` : `${activeEmployees} usuarios activos`}</CardDescription>
           </div>
         </div>
-        <Badge variant="secondary">ID #{account?.id?.slice(0, 8) ?? 'N/A'}</Badge>
       </CardHeader>
       <CardContent className="grid gap-6 md:grid-cols-2">
         <div className="space-y-3">
@@ -58,8 +57,8 @@ export default function CompanySummaryCard({ account, profile, planDisplay, acti
           <h4 className="font-semibold text-sm text-muted-foreground">Contacto corporativo</h4>
           <div className="grid gap-2 text-sm text-muted-foreground">
             <span className="flex items-center gap-2">
-              <Mail className="h-4 w-4 text-primary" />
-              {ownerEmail}
+              <Users className="h-4 w-4 text-primary" />
+              {profile?.name || 'Usuario principal'}
             </span>
             <span className="flex items-center gap-2">
               <MapPin className="h-4 w-4 text-primary" />
