@@ -522,6 +522,35 @@ serve(async (req) => {
   // Generate invitation URL
   const inviteUrl = `https://ai-expense-pro.vercel.app/accept-invite?token=${invitation.token}`;
 
+  // Send invitation email via Supabase Auth
+  try {
+    const inviteEmailMetadata = {
+      ...userMetadata,
+      invitation_token: invitation.token,
+      invitation_url: inviteUrl,
+    };
+
+    console.log('[create-employee] Sending invitation email to:', email);
+    
+    const { data: inviteData, error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(
+      email,
+      {
+        data: inviteEmailMetadata,
+        redirectTo: inviteUrl,
+      }
+    );
+
+    if (inviteError) {
+      console.error('[create-employee] Failed to send invitation email:', inviteError);
+      // Don't fail the request, just log the error
+    } else {
+      console.log('[create-employee] Invitation email sent successfully to:', email);
+    }
+  } catch (emailError) {
+    console.error('[create-employee] Exception sending invitation email:', emailError);
+    // Don't fail the request, just log the error
+  }
+
   return new Response(
     JSON.stringify({
       success: true,
