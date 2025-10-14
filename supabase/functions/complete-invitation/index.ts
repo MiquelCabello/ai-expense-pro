@@ -112,7 +112,7 @@ serve(async (req) => {
     });
   }
 
-  console.log('[complete-invitation] Creating user for:', invitation.email);
+  console.log('[complete-invitation] Processing invitation for:', invitation.email);
 
   // Create user metadata
   const userMetadata: Record<string, unknown> = {
@@ -128,32 +128,66 @@ serve(async (req) => {
     userMetadata.region = invitation.region;
   }
 
-  // Create the user
-  const { data: newUser, error: createUserError } = await adminClient.auth.admin.createUser({
-    email: invitation.email,
-    password: password,
-    email_confirm: true, // Auto-confirm email
-    user_metadata: userMetadata,
-  });
-
-  if (createUserError || !newUser.user) {
-    console.error('[complete-invitation] Failed to create user:', createUserError);
-    
-    // Check if user already exists
-    if (createUserError?.message?.includes('already registered')) {
-      return new Response(JSON.stringify({ error: 'user_already_exists' }), {
-        status: 409,
-        headers: jsonHeaders,
-      });
-    }
-    
-    return new Response(JSON.stringify({ error: 'user_creation_failed' }), {
+  // Check if user already exists (created by inviteUserByEmail)
+  const { data: existingUsers, error: listError } = await adminClient.auth.admin.listUsers();
+  
+  if (listError) {
+    console.error('[complete-invitation] Error listing users:', listError);
+    return new Response(JSON.stringify({ error: 'user_lookup_failed' }), {
       status: 500,
       headers: jsonHeaders,
     });
   }
 
-  console.log('[complete-invitation] User created successfully:', newUser.user.id);
+  const existingUser = existingUsers.users.find(u => u.email?.toLowerCase() === invitation.email.toLowerCase());
+  
+  let userId: string;
+
+  if (existingUser) {
+    // User already exists (created by inviteUserByEmail), just update password
+    console.log('[complete-invitation] User already exists, updating password:', existingUser.id);
+    
+    const { data: updatedUser, error: updateError } = await adminClient.auth.admin.updateUserById(
+      existingUser.id,
+      {
+        password: password,
+        email_confirm: true,
+        user_metadata: userMetadata,
+      }
+    );
+
+    if (updateError || !updatedUser.user) {
+      console.error('[complete-invitation] Failed to update user password:', updateError);
+      return new Response(JSON.stringify({ error: 'password_update_failed' }), {
+        status: 500,
+        headers: jsonHeaders,
+      });
+    }
+
+    userId = updatedUser.user.id;
+    console.log('[complete-invitation] User password updated successfully:', userId);
+  } else {
+    // User doesn't exist, create it (fallback case)
+    console.log('[complete-invitation] Creating new user for:', invitation.email);
+    
+    const { data: newUser, error: createUserError } = await adminClient.auth.admin.createUser({
+      email: invitation.email,
+      password: password,
+      email_confirm: true,
+      user_metadata: userMetadata,
+    });
+
+    if (createUserError || !newUser.user) {
+      console.error('[complete-invitation] Failed to create user:', createUserError);
+      return new Response(JSON.stringify({ error: 'user_creation_failed' }), {
+        status: 500,
+        headers: jsonHeaders,
+      });
+    }
+
+    userId = newUser.user.id;
+    console.log('[complete-invitation] User created successfully:', userId);
+  }
 
   // Mark invitation as used
   const { error: updateError } = await adminClient
@@ -165,9 +199,9 @@ serve(async (req) => {
     console.warn('[complete-invitation] Failed to mark invitation as used:', updateError);
   }
 
-  // Create a session for the new user
+  // Create a session for the user
   const { data: sessionData, error: sessionError } = await adminClient.auth.admin.createSession({
-    user_id: newUser.user.id,
+    user_id: userId,
   });
 
   if (sessionError || !sessionData.session) {
@@ -175,8 +209,8 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: true,
-        user_id: newUser.user.id,
-        message: 'user_created_no_session',
+        user_id: userId,
+        message: 'invitation_completed_no_session',
       }),
       {
         status: 200,
@@ -188,9 +222,9 @@ serve(async (req) => {
   return new Response(
     JSON.stringify({
       success: true,
-      user_id: newUser.user.id,
+      user_id: userId,
       session: sessionData.session,
-      message: 'user_created',
+      message: 'invitation_completed',
     }),
     {
       status: 200,
