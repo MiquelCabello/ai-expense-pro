@@ -102,52 +102,34 @@ export default function AcceptInvitePage() {
 
       if (error) {
         console.error('[AcceptInvite] Error completing invitation:', error);
-        toast.error('No se pudo completar la invitación. Intenta de nuevo.');
+        console.error('[AcceptInvite] Error details:', JSON.stringify(error, null, 2));
+        toast.error('No se pudo completar la invitación. Por favor, contacta al administrador.');
         setSubmitting(false);
         return;
       }
 
+      console.log('[AcceptInvite] Response from edge function:', JSON.stringify(data, null, 2));
+
       if (!data.success) {
+        console.error('[AcceptInvite] Invitation failed:', data.error);
         const errorMessage = data.error === 'user_already_exists' 
           ? 'Ya existe una cuenta con este email.'
+          : data.error === 'invitation_update_failed'
+          ? 'Error al actualizar la invitación.'
           : data.error || 'Error al crear la cuenta.';
         toast.error(errorMessage);
         setSubmitting(false);
         return;
       }
 
-      console.log('[AcceptInvite] Invitation completed successfully');
+      console.log('[AcceptInvite] Invitation completed successfully for:', data.email);
 
-      toast.success('¡Cuenta activada correctamente! Redirigiendo...');
+      toast.success('¡Cuenta activada correctamente! Redirigiendo al login...');
 
-      // If we got a session, set it and then navigate
-      if (data.session) {
-        const { error: sessionError } = await supabase.auth.setSession({
-          access_token: data.session.access_token,
-          refresh_token: data.session.refresh_token,
-        });
-
-        if (sessionError) {
-          console.error('[AcceptInvite] Session error:', sessionError);
-          toast.error('Error al establecer la sesión. Por favor, inicia sesión manualmente.');
-          setSubmitting(false);
-          setTimeout(() => navigate('/auth'), 2000);
-          return;
-        }
-
-        console.log('[AcceptInvite] Session established, redirecting to dashboard...');
-        
-        // Wait a moment for session to be fully established
-        setTimeout(() => {
-          navigate('/', { replace: true });
-        }, 1500);
-      } else {
-        // No session returned, redirect to login
-        console.log('[AcceptInvite] No session returned, redirecting to login...');
-        setTimeout(() => {
-          navigate('/auth', { replace: true });
-        }, 2000);
-      }
+      // Always redirect to login so user can sign in with their new password
+      setTimeout(() => {
+        navigate('/auth', { replace: true });
+      }, 2000);
     } catch (err) {
       console.error('[AcceptInvite] Unexpected error:', err);
       toast.error('Error inesperado al completar la invitación.');

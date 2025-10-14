@@ -197,33 +197,27 @@ serve(async (req) => {
 
   if (updateError) {
     console.warn('[complete-invitation] Failed to mark invitation as used:', updateError);
-  }
-
-  // Create a session for the user
-  const { data: sessionData, error: sessionError } = await adminClient.auth.admin.createSession({
-    user_id: userId,
-  });
-
-  if (sessionError || !sessionData.session) {
-    console.error('[complete-invitation] Failed to create session:', sessionError);
     return new Response(
-      JSON.stringify({
-        success: true,
-        user_id: userId,
-        message: 'invitation_completed_no_session',
+      JSON.stringify({ 
+        error: 'invitation_update_failed',
+        details: updateError.message 
       }),
       {
-        status: 200,
+        status: 500,
         headers: jsonHeaders,
       }
     );
   }
 
+  console.log('[complete-invitation] Invitation marked as used successfully');
+  console.log('[complete-invitation] User activation complete. User should log in with their new password.');
+
+  // Return success without session - user will need to log in
   return new Response(
     JSON.stringify({
       success: true,
       user_id: userId,
-      session: sessionData.session,
+      email: invitation.email,
       message: 'invitation_completed',
     }),
     {
