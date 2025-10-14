@@ -116,9 +116,11 @@ export default function AcceptInvitePage() {
         return;
       }
 
-      console.log('[AcceptInvite] User created, establishing session...');
+      console.log('[AcceptInvite] Invitation completed successfully');
 
-      // If we got a session, set it
+      toast.success('¡Cuenta activada correctamente! Redirigiendo...');
+
+      // If we got a session, set it and then navigate
       if (data.session) {
         const { error: sessionError } = await supabase.auth.setSession({
           access_token: data.session.access_token,
@@ -127,13 +129,25 @@ export default function AcceptInvitePage() {
 
         if (sessionError) {
           console.error('[AcceptInvite] Session error:', sessionError);
+          toast.error('Error al establecer la sesión. Por favor, inicia sesión manualmente.');
+          setSubmitting(false);
+          setTimeout(() => navigate('/auth'), 2000);
+          return;
         }
+
+        console.log('[AcceptInvite] Session established, redirecting to dashboard...');
+        
+        // Wait a moment for session to be fully established
+        setTimeout(() => {
+          navigate('/', { replace: true });
+        }, 1500);
+      } else {
+        // No session returned, redirect to login
+        console.log('[AcceptInvite] No session returned, redirecting to login...');
+        setTimeout(() => {
+          navigate('/auth', { replace: true });
+        }, 2000);
       }
-
-      toast.success('¡Cuenta creada correctamente!');
-
-      // Navigate to upload page
-      navigate('/upload');
     } catch (err) {
       console.error('[AcceptInvite] Unexpected error:', err);
       toast.error('Error inesperado al completar la invitación.');
