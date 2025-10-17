@@ -373,7 +373,7 @@ serve(async (req) => {
   if (allowsGlobalAdmins && requestedRole === 'ADMIN') {
     normalizedRole = 'ADMIN';
   } else if (allowsDepartmentAdmins && requestedRole === 'DEPARTMENT_ADMIN') {
-    normalizedRole = 'EMPLOYEE'; // Still EMPLOYEE in profiles table
+    normalizedRole = 'DEPARTMENT_ADMIN'; // Keep DEPARTMENT_ADMIN role
   }
   const rawDepartment = typeof payload.department === 'string' ? payload.department.trim() : '';
   const rawRegion = typeof payload.region === 'string' ? payload.region.trim() : '';
