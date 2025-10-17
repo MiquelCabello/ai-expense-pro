@@ -17,6 +17,7 @@ import EmployeesPage from "./pages/EmployeesPage";
 import ConfigurationPage from "./pages/ConfigurationPage";
 import UploadPage from "./pages/UploadPage";
 import NotFound from "./pages/NotFound";
+import MigrationTestPage from "./pages/MigrationTestPage";
 
 const queryClient = new QueryClient();
 
@@ -118,6 +119,11 @@ const App = () => (
               <Route path="/upload" element={
                 <ProtectedRoute>
                   <UploadPage />
+                </ProtectedRoute>
+              } />
+              <Route path="/migration-test" element={
+                <ProtectedRoute>
+                  <MigrationTestPage />
                 </ProtectedRoute>
               } />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
