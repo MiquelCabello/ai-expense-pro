@@ -204,8 +204,9 @@ export default function ConfigurationPage() {
         }
       }
 
-      // Cargar información de la empresa
-      if (companyV2) {
+      // Cargar información de la empresa SIEMPRE, no solo cuando companyV2 existe
+      if (companyV2?.id) {
+        console.log('[Configuration] Loading company info:', companyV2);
         setCompanyInfo({
           name: companyV2.name || '',
           tax_id: companyV2.tax_id || '',
@@ -218,6 +219,8 @@ export default function ConfigurationPage() {
           description: companyV2.description || '',
           logo_url: companyV2.logo_url || '',
         });
+      } else {
+        console.warn('[Configuration] No company data available');
       }
 
       let categoriesQuery = supabase
@@ -387,9 +390,6 @@ export default function ConfigurationPage() {
       
       // Recargar datos para refrescar todo
       await loadData();
-      
-      // Forzar recarga de la página para actualizar useAuthV2
-      window.location.reload();
     } catch (error) {
       console.error('Error uploading logo:', error);
       toast.error('Error al subir el logo');

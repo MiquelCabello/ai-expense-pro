@@ -19,7 +19,7 @@ import {
 import { useLocation, useNavigate } from 'react-router-dom';
 
 export default function Sidebar() {
-  const { user, company, membership, isMaster, signOut, profileV2 } = useAuthV2();
+  const { user, company, membership, isMaster, signOut, profileV2, loading } = useAuthV2();
   const location = useLocation();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
@@ -39,59 +39,99 @@ export default function Sidebar() {
   const companyName = company?.name || 'Mi Empresa';
   const userName = profileV2?.name || user?.email?.split('@')[0] || 'Usuario';
 
-  const navigation = [
-    {
-      name: 'Dashboard',
-      href: '/dashboard',
-      icon: BarChart3,
-      current: location.pathname === '/dashboard'
-    },
-    {
-      name: 'Gastos',
-      href: '/gastos',
-      icon: FileText,
-      current: location.pathname === '/gastos'
-    },
-    {
-      name: 'Subir Ticket',
-      href: '/upload',
-      icon: Upload,
-      current: location.pathname === '/upload'
-    },
-    {
-      name: 'Análisis',
-      href: '/analisis',
-      icon: PieChart,
-      current: location.pathname === '/analisis'
-    },
-    {
-      name: 'Mi Empresa',
-      href: '/empresa',
-      icon: Building2,
-      current: location.pathname === '/empresa'
-    },
-    ...(isAdmin
-      ? [{
-        name: 'Empleados',
-        href: '/empleados',
-        icon: Users,
-        current: location.pathname === '/empleados'
-      }]
-      : []),
-    ...(isAdmin
-      ? [{
-        name: 'Configuración',
-        href: '/configuracion',
-        icon: Settings,
-        current: location.pathname === '/configuracion'
-      }, {
-        name: 'Test Migración',
-        href: '/migration-test',
-        icon: Database,
-        current: location.pathname === '/migration-test'
-      }]
-      : [])
-  ];
+  // No mostrar menús admin hasta que termine de cargar
+  const navigation = useMemo(() => {
+    // Si está cargando, solo mostrar menús básicos
+    if (loading) {
+      return [
+        {
+          name: 'Dashboard',
+          href: '/dashboard',
+          icon: BarChart3,
+          current: location.pathname === '/dashboard'
+        },
+        {
+          name: 'Gastos',
+          href: '/gastos',
+          icon: FileText,
+          current: location.pathname === '/gastos'
+        },
+        {
+          name: 'Subir Ticket',
+          href: '/upload',
+          icon: Upload,
+          current: location.pathname === '/upload'
+        },
+        {
+          name: 'Análisis',
+          href: '/analisis',
+          icon: PieChart,
+          current: location.pathname === '/analisis'
+        },
+        {
+          name: 'Mi Empresa',
+          href: '/empresa',
+          icon: Building2,
+          current: location.pathname === '/empresa'
+        }
+      ];
+    }
+
+    // Cuando ya cargó, mostrar menús según rol
+    return [
+      {
+        name: 'Dashboard',
+        href: '/dashboard',
+        icon: BarChart3,
+        current: location.pathname === '/dashboard'
+      },
+      {
+        name: 'Gastos',
+        href: '/gastos',
+        icon: FileText,
+        current: location.pathname === '/gastos'
+      },
+      {
+        name: 'Subir Ticket',
+        href: '/upload',
+        icon: Upload,
+        current: location.pathname === '/upload'
+      },
+      {
+        name: 'Análisis',
+        href: '/analisis',
+        icon: PieChart,
+        current: location.pathname === '/analisis'
+      },
+      {
+        name: 'Mi Empresa',
+        href: '/empresa',
+        icon: Building2,
+        current: location.pathname === '/empresa'
+      },
+      ...(isAdmin
+        ? [{
+          name: 'Empleados',
+          href: '/empleados',
+          icon: Users,
+          current: location.pathname === '/empleados'
+        }]
+        : []),
+      ...(isAdmin
+        ? [{
+          name: 'Configuración',
+          href: '/configuracion',
+          icon: Settings,
+          current: location.pathname === '/configuracion'
+        }, {
+          name: 'Test Migración',
+          href: '/migration-test',
+          icon: Database,
+          current: location.pathname === '/migration-test'
+        }]
+        : [])
+    ];
+  }, [location.pathname, isAdmin, loading]);
 
   return (
     <>
