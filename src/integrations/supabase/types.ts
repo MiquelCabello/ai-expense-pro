@@ -137,6 +137,7 @@ export type Database = {
         Row: {
           account_id: string | null
           budget_monthly: number | null
+          company_id: string | null
           created_at: string
           id: string
           name: string
@@ -145,6 +146,7 @@ export type Database = {
         Insert: {
           account_id?: string | null
           budget_monthly?: number | null
+          company_id?: string | null
           created_at?: string
           id?: string
           name: string
@@ -153,12 +155,28 @@ export type Database = {
         Update: {
           account_id?: string | null
           budget_monthly?: number | null
+          company_id?: string | null
           created_at?: string
           id?: string
           name?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "categories_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "categories_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "user_permissions_dual"
+            referencedColumns: ["company_id"]
+          },
+        ]
       }
       companies: {
         Row: {
@@ -286,6 +304,7 @@ export type Database = {
           approver_id: string | null
           category_id: string
           classification_path: string | null
+          company_id: string | null
           created_at: string
           currency: string
           doc_type: Database["public"]["Enums"]["expense_doc_type"] | null
@@ -316,6 +335,7 @@ export type Database = {
           approver_id?: string | null
           category_id: string
           classification_path?: string | null
+          company_id?: string | null
           created_at?: string
           currency?: string
           doc_type?: Database["public"]["Enums"]["expense_doc_type"] | null
@@ -346,6 +366,7 @@ export type Database = {
           approver_id?: string | null
           category_id?: string
           classification_path?: string | null
+          company_id?: string | null
           created_at?: string
           currency?: string
           doc_type?: Database["public"]["Enums"]["expense_doc_type"] | null
@@ -375,6 +396,20 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "categories"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expenses_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expenses_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "user_permissions_dual"
+            referencedColumns: ["company_id"]
           },
           {
             foreignKeyName: "expenses_project_code_id_fkey"
@@ -616,6 +651,7 @@ export type Database = {
         Row: {
           account_id: string | null
           code: string
+          company_id: string | null
           created_at: string
           id: string
           name: string
@@ -625,6 +661,7 @@ export type Database = {
         Insert: {
           account_id?: string | null
           code: string
+          company_id?: string | null
           created_at?: string
           id?: string
           name: string
@@ -634,13 +671,29 @@ export type Database = {
         Update: {
           account_id?: string | null
           code?: string
+          company_id?: string | null
           created_at?: string
           id?: string
           name?: string
           status?: Database["public"]["Enums"]["project_status"]
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "project_codes_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_codes_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "user_permissions_dual"
+            referencedColumns: ["company_id"]
+          },
+        ]
       }
       receipt_files: {
         Row: {
