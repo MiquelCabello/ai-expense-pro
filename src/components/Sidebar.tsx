@@ -24,20 +24,39 @@ export default function Sidebar() {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
 
-  const planLabel = useMemo(() => {
+  // Para usuarios secundarios, mostrar el rol en lugar del plan
+  const displayLabel = useMemo(() => {
     if (isMaster) return 'Master';
-    if (!company?.plan) return 'Sin plan';
-    const map: Record<'free' | 'pro' | 'enterprise', string> = {
-      free: 'Starter',
-      pro: 'Professional',
-      enterprise: 'Enterprise',
-    };
-    return map[company.plan];
-  }, [company?.plan, isMaster]);
+    
+    // Si es owner, mostrar el plan de la empresa
+    if (membership?.role === 'owner') {
+      if (!company?.plan) return 'Sin plan';
+      const map: Record<'free' | 'pro' | 'enterprise', string> = {
+        free: 'Starter',
+        pro: 'Professional',
+        enterprise: 'Enterprise',
+      };
+      return `Plan ${map[company.plan]}`;
+    }
+    
+    // Para otros usuarios, mostrar su rol
+    if (membership?.role) {
+      const roleMap: Record<string, string> = {
+        'company_admin': 'Admin. Global',
+        'global_admin': 'Admin. Global',
+        'department_admin': 'Admin. de Departamento',
+        'employee': 'Empleado'
+      };
+      return roleMap[membership.role] || 'Empleado';
+    }
+    
+    return 'Empleado';
+  }, [company?.plan, isMaster, membership?.role]);
 
   const isAdmin = membership?.role !== 'employee' || isMaster;
   const companyName = company?.name || 'Mi Empresa';
-  const userName = profileV2?.name || user?.email?.split('@')[0] || 'Usuario';
+  const userName = profileV2?.email || user?.email || 'Usuario';
+  const logoUrl = company?.logo_url;
 
   // No mostrar menús admin hasta que termine de cargar
   const navigation = useMemo(() => {
@@ -138,14 +157,24 @@ export default function Sidebar() {
       {/* Header */}
       <div className="p-6 border-b border-border">
         <div className="flex items-center space-x-3">
-          <div className="bg-gradient-primary rounded-lg p-2">
-            <BarChart3 className="h-6 w-6 text-primary-foreground" />
-          </div>
-          <div>
-            <h1 className="text-lg font-bold">ExpenseFlow</h1>
-            <p className="text-xs text-muted-foreground">Gestión de Gastos</p>
+          {logoUrl ? (
+            <div className="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0">
+              <img 
+                src={logoUrl} 
+                alt={companyName}
+                className="w-full h-full object-cover"
+              />
+            </div>
+          ) : (
+            <div className="bg-gradient-primary rounded-lg p-2 flex-shrink-0">
+              <BarChart3 className="h-6 w-6 text-primary-foreground" />
+            </div>
+          )}
+          <div className="flex-1 min-w-0">
+            <h1 className="text-lg font-bold truncate">{companyName}</h1>
+            <p className="text-xs text-muted-foreground truncate">Gestión de Gastos</p>
             <Badge variant="secondary" className="mt-1">
-              Plan {planLabel}
+              {displayLabel}
             </Badge>
           </div>
         </div>

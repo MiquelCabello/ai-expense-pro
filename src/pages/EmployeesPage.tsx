@@ -86,8 +86,7 @@ export default function EmployeesPage() {
     membership?.role === 'owner' || 
     membership?.role === 'company_admin' || 
     membership?.role === 'global_admin' || 
-    membership?.role === 'department_admin' ||
-    profile?.role === 'ADMIN';
+    membership?.role === 'department_admin';
   
   // Determinar el tipo de administrador
   const isDepartmentAdmin = membership?.role === 'department_admin';
