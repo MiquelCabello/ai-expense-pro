@@ -17,6 +17,14 @@ export interface Company {
   category_limit: number | null;
   global_admin_limit: number | null;
   department_admin_limit: number | null;
+  tax_id?: string | null;
+  address?: string | null;
+  city?: string | null;
+  postal_code?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  website?: string | null;
+  description?: string | null;
 }
 
 export interface Membership {
@@ -104,7 +112,15 @@ export function AuthV2Provider({ children }: { children: ReactNode }) {
               monthly_expense_limit,
               category_limit,
               global_admin_limit,
-              department_admin_limit
+              department_admin_limit,
+              tax_id,
+              address,
+              city,
+              postal_code,
+              phone,
+              email,
+              website,
+              description
             )
           `)
           .eq('user_id', currentUser.id)

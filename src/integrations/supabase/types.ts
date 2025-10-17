@@ -162,9 +162,13 @@ export type Database = {
       }
       companies: {
         Row: {
+          address: string | null
           category_limit: number | null
+          city: string | null
           created_at: string
           department_admin_limit: number | null
+          description: string | null
+          email: string | null
           global_admin_limit: number | null
           id: string
           max_employees: number | null
@@ -173,13 +177,21 @@ export type Database = {
           monthly_expense_limit: number | null
           name: string
           owner_user_id: string
+          phone: string | null
           plan: Database["public"]["Enums"]["plan_tier"]
+          postal_code: string | null
+          tax_id: string | null
           updated_at: string
+          website: string | null
         }
         Insert: {
+          address?: string | null
           category_limit?: number | null
+          city?: string | null
           created_at?: string
           department_admin_limit?: number | null
+          description?: string | null
+          email?: string | null
           global_admin_limit?: number | null
           id?: string
           max_employees?: number | null
@@ -188,13 +200,21 @@ export type Database = {
           monthly_expense_limit?: number | null
           name: string
           owner_user_id: string
+          phone?: string | null
           plan?: Database["public"]["Enums"]["plan_tier"]
+          postal_code?: string | null
+          tax_id?: string | null
           updated_at?: string
+          website?: string | null
         }
         Update: {
+          address?: string | null
           category_limit?: number | null
+          city?: string | null
           created_at?: string
           department_admin_limit?: number | null
+          description?: string | null
+          email?: string | null
           global_admin_limit?: number | null
           id?: string
           max_employees?: number | null
@@ -203,8 +223,12 @@ export type Database = {
           monthly_expense_limit?: number | null
           name?: string
           owner_user_id?: string
+          phone?: string | null
           plan?: Database["public"]["Enums"]["plan_tier"]
+          postal_code?: string | null
+          tax_id?: string | null
           updated_at?: string
+          website?: string | null
         }
         Relationships: []
       }
