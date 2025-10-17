@@ -64,7 +64,7 @@ export default function EmployeesPage() {
   const accountId = profile?.account_id ?? null;
   const maxEmployees = account?.max_employees ?? null;
   const canAssignRoles = account?.can_assign_roles ?? false;
-  const canAssignDepartment = account?.can_assign_department ?? false;
+  const canAssignDepartment = account?.plan === 'ENTERPRISE'; // Solo ENTERPRISE puede asignar departamentos
   const canAssignRegion = account?.can_assign_region ?? false;
   const planLabel = account?.plan ?? 'FREE';
   const planNameMap: Record<string, string> = { FREE: 'Starter', PROFESSIONAL: 'Professional', ENTERPRISE: 'Enterprise' };
@@ -447,11 +447,14 @@ export default function EmployeesPage() {
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4">
-                {!canAssignRoles || !canAssignDepartment || !canAssignRegion ? (
+                {(!canAssignRoles || !canAssignDepartment || !canAssignRegion) && (
                   <p className="text-xs text-muted-foreground">
-                    Los empleados creados en el plan {planName} recibirán acceso estándar. Podrás ampliar estas opciones al mejorar de plan.
+                    {!canAssignRoles && "• No puedes asignar roles personalizados. "}
+                    {!canAssignDepartment && "• Los departamentos solo están disponibles en el plan Enterprise. "}
+                    {!canAssignRegion && "• No puedes asignar regiones. "}
+                    Los empleados recibirán acceso estándar.
                   </p>
-                ) : null}
+                )}
                 <div className="space-y-2">
                   <Label htmlFor="name">Nombre Completo</Label>
                   <Input
@@ -483,7 +486,7 @@ export default function EmployeesPage() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="EMPLOYEE">Empleado</SelectItem>
-                        {(account?.plan === 'PROFESSIONAL' || account?.plan === 'ENTERPRISE') && canAssignDepartment && (
+                        {account?.plan === 'ENTERPRISE' && canAssignDepartment && (
                           <SelectItem value="DEPARTMENT_ADMIN">Administrador de Departamento</SelectItem>
                         )}
                         {account?.plan === 'ENTERPRISE' && canAssignRoles && (
@@ -493,7 +496,7 @@ export default function EmployeesPage() {
                     </Select>
                     {newEmployee.role === 'DEPARTMENT_ADMIN' && (
                       <p className="text-xs text-muted-foreground">
-                        Puede gestionar y ver gastos de su departamento. Límite: 2 en plan Professional.
+                        Puede gestionar y ver gastos de su departamento (solo disponible en Enterprise).
                       </p>
                     )}
                   </div>

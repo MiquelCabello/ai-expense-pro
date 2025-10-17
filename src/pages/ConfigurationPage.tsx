@@ -14,7 +14,7 @@ import { toast } from 'sonner';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/components/ThemeProvider';
-import { Settings, Euro, Globe, Clock, Palette, FolderOpen, Briefcase, Plus, Edit2, Trash2 } from 'lucide-react';
+import { Settings, Euro, Globe, Clock, Palette, FolderOpen, Briefcase, Plus, Edit2, Trash2, Building2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 interface Category {
@@ -30,6 +30,13 @@ interface ProjectCode {
   status: string;
 }
 
+interface Department {
+  id: string;
+  name: string;
+  account_id: string;
+  created_at: string;
+}
+
 const PREFERENCES_STORAGE_KEY = 'expensepro-general-preferences';
 
 const isValidThemePreference = (value: unknown): value is 'light' | 'dark' | 'system' =>
@@ -41,6 +48,7 @@ export default function ConfigurationPage() {
   const { theme, setTheme } = useTheme();
   const [categories, setCategories] = useState<Category[]>([]);
   const [projectCodes, setProjectCodes] = useState<ProjectCode[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Configuration states
@@ -57,16 +65,21 @@ export default function ConfigurationPage() {
   // Dialog states
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [editingProject, setEditingProject] = useState<ProjectCode | null>(null);
+  const [editingDepartment, setEditingDepartment] = useState<Department | null>(null);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newCategoryBudget, setNewCategoryBudget] = useState('');
   const [newProjectCode, setNewProjectCode] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
+  const [newDepartmentName, setNewDepartmentName] = useState('');
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [isAddingProject, setIsAddingProject] = useState(false);
+  const [isAddingDepartment, setIsAddingDepartment] = useState(false);
   const [categoryToDelete, setCategoryToDelete] = useState<Category | null>(null);
   const [projectToDelete, setProjectToDelete] = useState<ProjectCode | null>(null);
+  const [departmentToDelete, setDepartmentToDelete] = useState<Department | null>(null);
   const [isDeletingCategory, setIsDeletingCategory] = useState(false);
   const [isDeletingProject, setIsDeletingProject] = useState(false);
+  const [isDeletingDepartment, setIsDeletingDepartment] = useState(false);
 
   const planNameMap: Record<'FREE' | 'PROFESSIONAL' | 'ENTERPRISE', string> = {
     FREE: 'Starter',
@@ -83,6 +96,7 @@ export default function ConfigurationPage() {
   const resolvedAccountId = isMaster ? null : (profile?.account_id ?? account?.id ?? null);
   const canAddCustomCategories = planKey !== 'FREE';
   const canManageProjects = planKey !== 'FREE';
+  const canManageDepartments = planKey === 'ENTERPRISE' || isMaster;
   const maxEmployees = isMaster ? null : account?.max_employees ?? planConfig[planKey].maxEmployees;
   const monthlyLimit = isMaster ? null : account?.monthly_expense_limit ?? planConfig[planKey].monthlyLimit;
   const categoryLimit = planConfig[planKey].categoryLimit;
@@ -152,6 +166,7 @@ export default function ConfigurationPage() {
         if (profile && profile.role !== 'ADMIN') {
           setCategories([]);
           setProjectCodes([]);
+          setDepartments([]);
           setLoading(false);
           return;
         }
@@ -163,6 +178,7 @@ export default function ConfigurationPage() {
           console.warn('[Configuration] Missing account_id for non-master user', profile?.id);
           setCategories([]);
           setProjectCodes([]);
+          setDepartments([]);
           setLoading(false);
           return;
         }
@@ -187,16 +203,32 @@ export default function ConfigurationPage() {
         projectCodesQuery = projectCodesQuery.eq('account_id', resolvedAccountId);
       }
 
-      const [{ data: categoriesData, error: categoriesError }, { data: projectCodesData, error: projectCodesError }] = await Promise.all([
+      let departmentsQuery = supabase
+        .from('account_departments')
+        .select('*')
+        .order('name');
+
+      if (!isMaster && resolvedAccountId) {
+        departmentsQuery = departmentsQuery.eq('account_id', resolvedAccountId);
+      }
+
+      const [
+        { data: categoriesData, error: categoriesError }, 
+        { data: projectCodesData, error: projectCodesError },
+        { data: departmentsData, error: departmentsError }
+      ] = await Promise.all([
         categoriesQuery,
         projectCodesQuery,
+        departmentsQuery,
       ]);
 
       if (categoriesError) throw categoriesError;
       if (projectCodesError) throw projectCodesError;
+      if (departmentsError) throw departmentsError;
 
       setCategories(categoriesData ?? []);
       setProjectCodes(projectCodesData ?? []);
+      setDepartments(departmentsData ?? []);
     } catch (error) {
       console.error('Error loading configuration data:', error);
       toast.error('Error al cargar los datos de configuración');
@@ -483,6 +515,119 @@ export default function ConfigurationPage() {
       toast.error('Error al desactivar código de proyecto');
     } finally {
       setIsDeletingProject(false);
+    }
+  };
+
+  // Funciones para gestión de Departamentos
+  const handleEditDepartment = (department: Department) => {
+    setEditingDepartment(department);
+    setNewDepartmentName(department.name);
+  };
+
+  const handleUpdateDepartment = async () => {
+    if (isMaster) {
+      toast.info('Gestiona los departamentos desde la consola administrativa global.');
+      return;
+    }
+
+    if (!editingDepartment || !resolvedAccountId) {
+      toast.error('No se ha podido identificar la cuenta activa.');
+      return;
+    }
+
+    if (!newDepartmentName.trim()) {
+      toast.error('El nombre del departamento es requerido');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('account_departments')
+        .update({
+          name: newDepartmentName,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', editingDepartment.id)
+        .eq('account_id', resolvedAccountId);
+
+      if (error) throw error;
+
+      toast.success('Departamento actualizado correctamente');
+      setEditingDepartment(null);
+      loadData();
+    } catch (error) {
+      toast.error('Error al actualizar departamento');
+    }
+  };
+
+  const handleAddDepartment = async () => {
+    if (isMaster) {
+      toast.info('Gestiona los departamentos desde la consola administrativa global.');
+      return;
+    }
+
+    if (!resolvedAccountId) {
+      toast.error('No se ha podido identificar la cuenta activa.');
+      return;
+    }
+
+    if (!canManageDepartments) {
+      toast.error('La gestión de departamentos está disponible solo en el plan Enterprise.');
+      return;
+    }
+
+    if (!newDepartmentName.trim()) {
+      toast.error('El nombre del departamento es requerido');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('account_departments')
+        .insert({
+          name: newDepartmentName,
+          account_id: resolvedAccountId
+        });
+
+      if (error) throw error;
+
+      toast.success('Departamento añadido correctamente');
+      setIsAddingDepartment(false);
+      setNewDepartmentName('');
+      loadData();
+    } catch (error) {
+      toast.error('Error al añadir departamento');
+    }
+  };
+
+  const handleDeleteDepartment = async () => {
+    if (isMaster) {
+      toast.info('Gestiona los departamentos desde la consola administrativa global.');
+      return;
+    }
+
+    if (!departmentToDelete || !resolvedAccountId) {
+      toast.error('No se ha podido identificar la cuenta activa.');
+      return;
+    }
+
+    setIsDeletingDepartment(true);
+    try {
+      const { error } = await supabase
+        .from('account_departments')
+        .delete()
+        .eq('id', departmentToDelete.id)
+        .eq('account_id', resolvedAccountId);
+
+      if (error) throw error;
+
+      toast.success(`Departamento "${departmentToDelete.name}" eliminado correctamente`);
+      setDepartmentToDelete(null);
+      loadData();
+    } catch (error) {
+      toast.error('Error al eliminar departamento');
+    } finally {
+      setIsDeletingDepartment(false);
     }
   };
 
@@ -1088,6 +1233,144 @@ export default function ConfigurationPage() {
               <CardContent>
                 <p className="text-sm text-muted-foreground">
                   Los códigos de proyecto personalizados están disponibles a partir del plan Professional.
+                </p>
+                <Button className="mt-4" variant="outline" onClick={handleUpgradeClick}>Ver planes</Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Gestión de Departamentos - Solo ENTERPRISE */}
+          {canManageDepartments ? (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <Building2 className="h-5 w-5" />
+                    <span>Gestión de Departamentos</span>
+                  </div>
+                </div>
+                <CardDescription>Organiza a tus empleados por departamentos (solo Enterprise)</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {departments.map((department) => (
+                  <div
+                    key={department.id}
+                    className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-2 h-2 rounded-full bg-primary"></div>
+                      <span className="font-medium">{department.name}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2 sm:flex-nowrap sm:justify-end">
+                      <Dialog open={editingDepartment?.id === department.id} onOpenChange={(open) => !open && setEditingDepartment(null)}>
+                        <DialogTrigger asChild>
+                          <Button variant="outline" size="sm" onClick={() => handleEditDepartment(department)}>
+                            <Edit2 className="h-4 w-4 mr-1" />
+                            Editar
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                          <DialogHeader>
+                            <DialogTitle>Editar Departamento</DialogTitle>
+                            <DialogDescription>
+                              Actualiza el nombre del departamento
+                            </DialogDescription>
+                          </DialogHeader>
+                          <div className="space-y-4">
+                            <div>
+                              <Label htmlFor="department-name">Nombre</Label>
+                              <Input
+                                id="department-name"
+                                value={newDepartmentName}
+                                onChange={(e) => setNewDepartmentName(e.target.value)}
+                                placeholder="Nombre del departamento"
+                              />
+                            </div>
+                            <div className="flex justify-end space-x-2">
+                              <Button variant="outline" onClick={() => setEditingDepartment(null)}>
+                                Cancelar
+                              </Button>
+                              <Button onClick={handleUpdateDepartment}>
+                                Guardar
+                              </Button>
+                            </div>
+                          </div>
+                        </DialogContent>
+                      </Dialog>
+                      <Button variant="destructive" size="sm" onClick={() => setDepartmentToDelete(department)}>
+                        <Trash2 className="h-4 w-4 mr-1" />
+                        Eliminar
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+
+                <AlertDialog open={!!departmentToDelete} onOpenChange={(open) => !open && setDepartmentToDelete(null)}>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>¿Eliminar departamento?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Esta acción eliminará el departamento "{departmentToDelete?.name}".
+                        Los empleados asignados a este departamento quedarán sin departamento asignado.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                      <AlertDialogAction onClick={handleDeleteDepartment} disabled={isDeletingDepartment}>
+                        {isDeletingDepartment ? 'Eliminando...' : 'Eliminar'}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+
+                <Dialog open={isAddingDepartment} onOpenChange={setIsAddingDepartment}>
+                  <DialogTrigger asChild>
+                    <Button className="w-full bg-gradient-primary hover:opacity-90">
+                      <Plus className="h-4 w-4 mr-2" />
+                      Nuevo Departamento
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Nuevo Departamento</DialogTitle>
+                      <DialogDescription>
+                        Crea un nuevo departamento para organizar a tus empleados
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      <div>
+                        <Label htmlFor="department-new-name">Nombre</Label>
+                        <Input
+                          id="department-new-name"
+                          value={newDepartmentName}
+                          onChange={(e) => setNewDepartmentName(e.target.value)}
+                          placeholder="Ej: Recursos Humanos, IT, Ventas"
+                        />
+                      </div>
+                      <div className="flex justify-end space-x-2">
+                        <Button variant="outline" onClick={() => setIsAddingDepartment(false)}>
+                          Cancelar
+                        </Button>
+                        <Button onClick={handleAddDepartment}>
+                          Crear
+                        </Button>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="opacity-90">
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <Building2 className="h-5 w-5" />
+                  <span>Gestión de Departamentos</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">
+                  La gestión de departamentos está disponible exclusivamente en el plan Enterprise.
                 </p>
                 <Button className="mt-4" variant="outline" onClick={handleUpgradeClick}>Ver planes</Button>
               </CardContent>
