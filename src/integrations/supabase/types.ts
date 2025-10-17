@@ -681,7 +681,15 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      migration_status_v1: {
+        Row: {
+          migrated_count: number | null
+          migration: string | null
+          pending_count: number | null
+          total_original: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       check_plan_limits: {
