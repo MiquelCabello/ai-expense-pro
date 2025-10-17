@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
-import { Users, ShieldCheck, Briefcase, Activity } from 'lucide-react';
-import { useAuth } from '@/hooks/useAuth';
+import { Users, ShieldCheck, Briefcase, Activity, Building2 } from 'lucide-react';
+import { useAuthV2 } from '@/hooks/useAuthV2';
 import { supabase } from '@/integrations/supabase/client';
 import { useNavigate } from 'react-router-dom';
 import CompanySummaryCard from '@/components/CompanySummaryCard';
@@ -46,18 +45,19 @@ const PLAN_LABEL: Record<'FREE' | 'PROFESSIONAL' | 'ENTERPRISE', string> = {
 };
 
 export default function CompanyProfilePage() {
-  const { account, profile, isMaster } = useAuth();
+  const { company, membership, isMaster, profileV2, loading: authLoading } = useAuthV2();
   const navigate = useNavigate();
   const [metrics, setMetrics] = useState<CompanyMetrics>({ total: 0, active: 0, inactive: 0, admins: 0, employees: 0 });
   const [loading, setLoading] = useState(true);
 
-  const planKey = (account?.plan ?? 'FREE') as 'FREE' | 'PROFESSIONAL' | 'ENTERPRISE';
+  const isAdmin = membership?.role !== 'employee' || isMaster;
+  const planKey = (company?.plan?.toUpperCase() ?? 'FREE') as 'FREE' | 'PROFESSIONAL' | 'ENTERPRISE';
   const planLabel = PLAN_LABEL[planKey];
-  const maxEmployees = account?.max_employees ?? (planKey === 'FREE' ? 2 : planKey === 'PROFESSIONAL' ? 25 : null);
+  const maxEmployees = company?.max_employees ?? (planKey === 'FREE' ? 2 : planKey === 'PROFESSIONAL' ? 25 : null);
 
   useEffect(() => {
-    const accountId = account?.id;
-    if (!accountId) {
+    const companyId = company?.id;
+    if (!companyId) {
       setLoading(false);
       return;
     }
@@ -65,20 +65,21 @@ export default function CompanyProfilePage() {
     const loadMetrics = async () => {
       try {
         setLoading(true);
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('status, role')
-          .eq('account_id', accountId);
+        
+        // Cargar métricas de membresías (nuevo sistema)
+        const { data: membershipsData, error: membershipsError } = await supabase
+          .from('memberships')
+          .select('role')
+          .eq('company_id', companyId);
 
-        if (error) throw error;
+        if (membershipsError) throw membershipsError;
 
         const initial: CompanyMetrics = { total: 0, active: 0, inactive: 0, admins: 0, employees: 0 };
-        const aggregated = (data ?? []).reduce((acc, row) => {
+        const aggregated = (membershipsData ?? []).reduce((acc, row) => {
           acc.total += 1;
-          if (row.status === 'ACTIVE') acc.active += 1;
-          if (row.status === 'INACTIVE') acc.inactive += 1;
-          if (row.role === 'ADMIN') acc.admins += 1;
-          if (row.role === 'EMPLOYEE') acc.employees += 1;
+          acc.active += 1; // En el nuevo sistema, todos los memberships son activos
+          if (row.role === 'owner' || row.role === 'company_admin' || row.role === 'global_admin') acc.admins += 1;
+          if (row.role === 'employee') acc.employees += 1;
           return acc;
         }, initial);
 
@@ -91,7 +92,7 @@ export default function CompanyProfilePage() {
     };
 
     void loadMetrics();
-  }, [account?.id]);
+  }, [company?.id]);
 
   const usagePercentage = useMemo(() => {
     if (!maxEmployees || maxEmployees === 0) return 100;
@@ -99,13 +100,29 @@ export default function CompanyProfilePage() {
     return Math.min(100, Math.round((metrics.active / maxEmployees) * 100));
   }, [metrics.active, maxEmployees]);
 
-  if (!account || isMaster) {
+  if (authLoading) {
+    return (
+      <AppLayout>
+        <div className="p-6 flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Cargando información de la empresa...</p>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  if (!company) {
     return (
       <AppLayout>
         <div className="p-6">
           <Card>
             <CardHeader>
-              <CardTitle>Sin información de empresa</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                <Building2 className="h-5 w-5" />
+                Sin información de empresa
+              </CardTitle>
               <CardDescription>
                 No hemos podido cargar los detalles de la cuenta. Inicia sesión con un usuario asociado a una empresa.
               </CardDescription>
@@ -119,17 +136,43 @@ export default function CompanyProfilePage() {
   const planDisplay = `Plan ${PLAN_LABEL[planKey]}`;
   const planFeatures = PLAN_FEATURES[planKey];
 
+  // Adaptar datos al formato esperado por CompanySummaryCard
+  const accountAdapter = {
+    id: company.id,
+    name: company.name,
+    plan: planKey,
+    owner_user_id: company.owner_user_id,
+    max_employees: company.max_employees,
+    monthly_expense_limit: company.monthly_expense_limit,
+  };
+
+  const profileAdapter = {
+    user_id: profileV2?.user_id ?? '',
+    email: profileV2?.email ?? '',
+    name: profileV2?.name ?? '',
+    role: isAdmin ? 'ADMIN' : 'EMPLOYEE',
+  };
+
   return (
     <AppLayout>
       <div className="p-6 space-y-6">
+        <div className="flex items-center gap-3 mb-4">
+          <Building2 className="h-8 w-8 text-primary" />
+          <div>
+            <h1 className="text-2xl font-bold">{company.name}</h1>
+            <p className="text-sm text-muted-foreground">Información de la empresa</p>
+          </div>
+        </div>
+
         <CompanySummaryCard
-          account={account}
-          profile={profile}
+          account={accountAdapter as any}
+          profile={profileAdapter as any}
           planDisplay={planDisplay}
           activeEmployees={metrics.active}
           maxEmployees={maxEmployees}
         />
-        {profile?.role === 'ADMIN' && (
+        
+        {isAdmin && (
           <Button className="self-start" variant="outline" onClick={() => navigate('/configuracion')}>
             Configurar empresa
           </Button>
@@ -218,7 +261,7 @@ export default function CompanyProfilePage() {
           </CardContent>
         </Card>
 
-        {profile?.role === 'ADMIN' && (
+        {isAdmin && (
           <Card>
             <CardHeader>
               <CardTitle>Configuración rápida</CardTitle>

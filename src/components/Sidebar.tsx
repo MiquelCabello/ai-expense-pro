@@ -64,6 +64,12 @@ export default function Sidebar() {
       icon: PieChart,
       current: location.pathname === '/analisis'
     },
+    {
+      name: 'Mi Empresa',
+      href: '/empresa',
+      icon: Building2,
+      current: location.pathname === '/empresa'
+    },
     ...(isAdmin
       ? [{
         name: 'Empleados',
