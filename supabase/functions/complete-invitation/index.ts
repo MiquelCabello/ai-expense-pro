@@ -243,8 +243,8 @@ serve(async (req) => {
         membershipRole = 'employee';
       }
 
-      // Solo asignar department_id si es department_admin
-      const finalDepartmentId = (membershipRole === 'department_admin' && departmentId) ? departmentId : null;
+      // NUEVO: Asignar department_id para TODOS los roles si tienen departamento
+      const finalDepartmentId = departmentId || null;
       
       const { error: membershipError } = await adminClient
         .from('memberships')
