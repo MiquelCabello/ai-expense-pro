@@ -325,6 +325,9 @@ export default function ConfigurationPage() {
       if (error) throw error;
 
       toast.success('Datos de la empresa guardados correctamente');
+      
+      // Recargar datos para refrescar todo
+      await loadData();
     } catch (error) {
       console.error('Error saving company profile:', error);
       toast.error('Error al guardar datos de la empresa');
@@ -381,6 +384,12 @@ export default function ConfigurationPage() {
 
       setCompanyInfo(prev => ({ ...prev, logo_url: publicUrl }));
       toast.success('Logo actualizado correctamente');
+      
+      // Recargar datos para refrescar todo
+      await loadData();
+      
+      // Forzar recarga de la página para actualizar useAuthV2
+      window.location.reload();
     } catch (error) {
       console.error('Error uploading logo:', error);
       toast.error('Error al subir el logo');
