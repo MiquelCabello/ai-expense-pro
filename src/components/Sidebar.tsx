@@ -55,7 +55,9 @@ export default function Sidebar() {
 
   const isAdmin = membership?.role !== 'employee' || isMaster;
   const companyName = company?.name || 'Mi Empresa';
-  const userName = profileV2?.email || user?.email || 'Usuario';
+  // Obtener el nombre del usuario desde profiles (sistema antiguo)
+  const userName = profileV2?.name || user?.email?.split('@')[0] || 'Usuario';
+  const userEmail = profileV2?.email || user?.email || '';
   const logoUrl = company?.logo_url;
 
   // No mostrar menús admin hasta que termine de cargar
@@ -234,7 +236,7 @@ export default function Sidebar() {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium truncate">{userName}</p>
-            <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+            <p className="text-xs text-muted-foreground truncate">{userEmail}</p>
           </div>
         </div>
         <Button 
