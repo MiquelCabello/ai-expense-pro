@@ -127,28 +127,10 @@ export default function EmployeesPage() {
         query = query.neq('user_id', user.id);
       }
 
-      // Si es admin de departamento, solo ver empleados de su departamento
+      // Si es admin de departamento, solo ver empleados de su departamento usando department_id
       if (isDepartmentAdmin && membership?.department_id) {
         console.log('[EmployeesPage] Department admin filter - department_id:', membership.department_id);
-        
-        // Obtener el nombre del departamento desde account_departments
-        const { data: deptData, error: deptError } = await supabase
-          .from('account_departments')
-          .select('name')
-          .eq('id', membership.department_id)
-          .maybeSingle();
-        
-        if (deptError) {
-          console.error('[EmployeesPage] Error fetching department name:', deptError);
-        }
-        
-        if (deptData?.name) {
-          console.log('[EmployeesPage] Filtering by department:', deptData.name);
-          // Filtrar por el nombre del departamento (campo texto)
-          query = query.eq('department', deptData.name);
-        } else {
-          console.warn('[EmployeesPage] No department name found for ID:', membership.department_id);
-        }
+        query = query.eq('department_id', membership.department_id);
       }
 
       const { data, error } = await query;
@@ -501,7 +483,8 @@ export default function EmployeesPage() {
                 ? 'Visualiza los empleados de tu departamento' 
                 : 'Administra usuarios y permisos del sistema'}
             </p>
-            {isAdmin && (
+            {/* Solo mostrar información de planes a global admins */}
+            {isGlobalAdmin && (
               <p className={`text-sm mt-1 ${isAtEmployeeLimit ? 'text-destructive' : 'text-muted-foreground'}`}>
                 Plan {planName} · {maxEmployees ? `${activeEmployeesCount}/${maxEmployees} usuarios activos` : `${activeEmployeesCount} usuarios activos`}
               </p>
