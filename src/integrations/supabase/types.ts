@@ -241,6 +241,13 @@ export type Database = {
             referencedRelation: "companies"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "departments_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "user_permissions_dual"
+            referencedColumns: ["company_id"]
+          },
         ]
       }
       expenses: {
@@ -485,6 +492,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "memberships_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "user_permissions_dual"
+            referencedColumns: ["company_id"]
+          },
+          {
             foreignKeyName: "memberships_department_id_fkey"
             columns: ["department_id"]
             isOneToOne: false
@@ -699,6 +713,19 @@ export type Database = {
         }
         Relationships: []
       }
+      user_permissions_dual: {
+        Row: {
+          company_id: string | null
+          company_name: string | null
+          current_user_id: string | null
+          has_company_scope: boolean | null
+          is_master: boolean | null
+          is_member: boolean | null
+          role_new_system: Database["public"]["Enums"]["role_type"] | null
+          role_old_system: Database["public"]["Enums"]["user_role"] | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       check_plan_limits: {
@@ -768,6 +795,10 @@ export type Database = {
       }
       has_department_scope_dual: {
         Args: { target_company: string; target_department: string }
+        Returns: boolean
+      }
+      has_dual_access_to_company: {
+        Args: { target_company_id: string }
         Returns: boolean
       }
       is_account_admin: {
