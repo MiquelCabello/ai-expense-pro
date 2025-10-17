@@ -171,6 +171,7 @@ export type Database = {
           email: string | null
           global_admin_limit: number | null
           id: string
+          logo_url: string | null
           max_employees: number | null
           migrated_from_account_id: string | null
           migration_status: string | null
@@ -194,6 +195,7 @@ export type Database = {
           email?: string | null
           global_admin_limit?: number | null
           id?: string
+          logo_url?: string | null
           max_employees?: number | null
           migrated_from_account_id?: string | null
           migration_status?: string | null
@@ -217,6 +219,7 @@ export type Database = {
           email?: string | null
           global_admin_limit?: number | null
           id?: string
+          logo_url?: string | null
           max_employees?: number | null
           migrated_from_account_id?: string | null
           migration_status?: string | null

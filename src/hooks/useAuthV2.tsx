@@ -25,6 +25,7 @@ export interface Company {
   email?: string | null;
   website?: string | null;
   description?: string | null;
+  logo_url?: string | null;
 }
 
 export interface Membership {
@@ -120,7 +121,8 @@ export function AuthV2Provider({ children }: { children: ReactNode }) {
               phone,
               email,
               website,
-              description
+              description,
+              logo_url
             )
           `)
           .eq('user_id', currentUser.id)

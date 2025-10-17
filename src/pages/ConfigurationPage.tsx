@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
@@ -13,8 +14,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/hooks/useAuth';
+import { useAuthV2 } from '@/hooks/useAuthV2';
 import { useTheme } from '@/components/ThemeProvider';
-import { Settings, Euro, Globe, Clock, Palette, FolderOpen, Briefcase, Plus, Edit2, Trash2, Building2 } from 'lucide-react';
+import { Settings, Euro, Globe, Clock, Palette, FolderOpen, Briefcase, Plus, Edit2, Trash2, Building2, Upload, Image as ImageIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 interface Category {
@@ -44,12 +46,30 @@ const isValidThemePreference = (value: unknown): value is 'light' | 'dark' | 'sy
 
 export default function ConfigurationPage() {
   const { profile, account, isMaster, user } = useAuth();
+  const { company: companyV2 } = useAuthV2();
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
   const [categories, setCategories] = useState<Category[]>([]);
   const [projectCodes, setProjectCodes] = useState<ProjectCode[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Company info states
+  const [companyInfo, setCompanyInfo] = useState({
+    name: '',
+    tax_id: '',
+    address: '',
+    city: '',
+    postal_code: '',
+    phone: '',
+    email: '',
+    website: '',
+    description: '',
+    logo_url: '',
+  });
+  const [isSavingCompany, setIsSavingCompany] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
 
   // Configuration states
   const [language, setLanguage] = useState('es');
@@ -184,6 +204,22 @@ export default function ConfigurationPage() {
         }
       }
 
+      // Cargar información de la empresa
+      if (companyV2) {
+        setCompanyInfo({
+          name: companyV2.name || '',
+          tax_id: companyV2.tax_id || '',
+          address: companyV2.address || '',
+          city: companyV2.city || '',
+          postal_code: companyV2.postal_code || '',
+          phone: companyV2.phone || '',
+          email: companyV2.email || '',
+          website: companyV2.website || '',
+          description: companyV2.description || '',
+          logo_url: companyV2.logo_url || '',
+        });
+      }
+
       let categoriesQuery = supabase
         .from('categories')
         .select('*')
@@ -235,7 +271,7 @@ export default function ConfigurationPage() {
     } finally {
       setLoading(false);
     }
-  }, [resolvedAccountId, isMaster, profile]);
+  }, [resolvedAccountId, isMaster, profile, companyV2]);
 
   const savePreferences = async () => {
     try {
@@ -264,14 +300,93 @@ export default function ConfigurationPage() {
   const saveCompanyProfile = async (event: React.FormEvent) => {
     event.preventDefault();
 
-    if (!account || !profile) {
+    if (!companyV2?.id) {
       toast.error('No se ha podido cargar la cuenta activa');
       return;
     }
 
-    // Placeholder: simulate persistence
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    toast.success('Datos de la empresa guardados (placeholder)');
+    try {
+      setIsSavingCompany(true);
+      const { error } = await supabase
+        .from('companies')
+        .update({
+          name: companyInfo.name,
+          tax_id: companyInfo.tax_id,
+          address: companyInfo.address,
+          city: companyInfo.city,
+          postal_code: companyInfo.postal_code,
+          phone: companyInfo.phone,
+          email: companyInfo.email,
+          website: companyInfo.website,
+          description: companyInfo.description,
+        })
+        .eq('id', companyV2.id);
+
+      if (error) throw error;
+
+      toast.success('Datos de la empresa guardados correctamente');
+    } catch (error) {
+      console.error('Error saving company profile:', error);
+      toast.error('Error al guardar datos de la empresa');
+    } finally {
+      setIsSavingCompany(false);
+    }
+  };
+
+  const handleLogoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !companyV2?.id) return;
+
+    // Validar tipo de archivo
+    if (!file.type.startsWith('image/')) {
+      toast.error('Por favor selecciona una imagen válida');
+      return;
+    }
+
+    // Validar tamaño (max 2MB)
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('La imagen debe ser menor a 2MB');
+      return;
+    }
+
+    try {
+      setUploadingLogo(true);
+
+      // Subir a storage
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${companyV2.id}-${Date.now()}.${fileExt}`;
+      const filePath = `logos/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('receipts')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: true
+        });
+
+      if (uploadError) throw uploadError;
+
+      // Obtener URL pública
+      const { data: { publicUrl } } = supabase.storage
+        .from('receipts')
+        .getPublicUrl(filePath);
+
+      // Actualizar empresa con el logo
+      const { error: updateError } = await supabase
+        .from('companies')
+        .update({ logo_url: publicUrl })
+        .eq('id', companyV2.id);
+
+      if (updateError) throw updateError;
+
+      setCompanyInfo(prev => ({ ...prev, logo_url: publicUrl }));
+      toast.success('Logo actualizado correctamente');
+    } catch (error) {
+      console.error('Error uploading logo:', error);
+      toast.error('Error al subir el logo');
+    } finally {
+      setUploadingLogo(false);
+    }
   };
 
   const saveFinancialConfig = async () => {
@@ -688,54 +803,166 @@ export default function ConfigurationPage() {
           </CardContent>
         </Card>
 
-        {!isMaster && (
+        {!isMaster && companyV2 && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center space-x-2">
-                <Briefcase className="h-5 w-5" />
-                <span>Datos de la empresa</span>
+                <Building2 className="h-5 w-5" />
+                <span>Información de la empresa</span>
               </CardTitle>
               <CardDescription>
-                Información básica de tu organización. Se mostrará como referencia a tus empleados.
+                Personaliza la información de tu organización que se mostrará en el perfil de empresa.
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <form onSubmit={saveCompanyProfile} className="grid gap-4 md:grid-cols-2">
-                <div className="md:col-span-2 space-y-2">
-                  <Label>Nombre comercial</Label>
-                  <Input defaultValue={account?.name ?? ''} placeholder="Nombre de la empresa" />
+              <form onSubmit={saveCompanyProfile} className="space-y-6">
+                {/* Logo Section */}
+                <div className="flex items-center gap-6">
+                  <div className="relative group">
+                    {companyInfo.logo_url ? (
+                      <img 
+                        src={companyInfo.logo_url} 
+                        alt="Logo de la empresa"
+                        className="h-24 w-24 object-contain rounded-lg border-2 border-border"
+                      />
+                    ) : (
+                      <div className="h-24 w-24 bg-muted rounded-lg border-2 border-dashed border-border flex items-center justify-center">
+                        <Building2 className="h-8 w-8 text-muted-foreground" />
+                      </div>
+                    )}
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="absolute -bottom-2 -right-2 rounded-full h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploadingLogo}
+                    >
+                      {uploadingLogo ? (
+                        <div className="h-4 w-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <ImageIcon className="h-4 w-4" />
+                      )}
+                    </Button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleLogoUpload}
+                      className="hidden"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-sm font-medium">Logo de la empresa</Label>
+                    <p className="text-xs text-muted-foreground">
+                      PNG, JPG o WEBP. Máximo 2MB.
+                    </p>
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label>Sector</Label>
-                  <Select defaultValue="services">
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecciona sector" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="services">Servicios profesionales</SelectItem>
-                      <SelectItem value="retail">Retail</SelectItem>
-                      <SelectItem value="manufacturing">Manufactura</SelectItem>
-                    </SelectContent>
-                  </Select>
+
+                <Separator />
+
+                {/* Información básica */}
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="md:col-span-2 space-y-2">
+                    <Label htmlFor="company-name">Nombre de la empresa *</Label>
+                    <Input 
+                      id="company-name"
+                      value={companyInfo.name}
+                      onChange={(e) => setCompanyInfo({ ...companyInfo, name: e.target.value })}
+                      placeholder="Nombre de la empresa"
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="tax-id">CIF/NIF</Label>
+                    <Input 
+                      id="tax-id"
+                      value={companyInfo.tax_id}
+                      onChange={(e) => setCompanyInfo({ ...companyInfo, tax_id: e.target.value })}
+                      placeholder="B12345678"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="company-email">Email de contacto</Label>
+                    <Input 
+                      id="company-email"
+                      type="email"
+                      value={companyInfo.email}
+                      onChange={(e) => setCompanyInfo({ ...companyInfo, email: e.target.value })}
+                      placeholder="contacto@empresa.com"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="company-phone">Teléfono</Label>
+                    <Input 
+                      id="company-phone"
+                      value={companyInfo.phone}
+                      onChange={(e) => setCompanyInfo({ ...companyInfo, phone: e.target.value })}
+                      placeholder="+34 123 456 789"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="company-website">Sitio web</Label>
+                    <Input 
+                      id="company-website"
+                      type="url"
+                      value={companyInfo.website}
+                      onChange={(e) => setCompanyInfo({ ...companyInfo, website: e.target.value })}
+                      placeholder="https://www.empresa.com"
+                    />
+                  </div>
+
+                  <div className="md:col-span-2 space-y-2">
+                    <Label htmlFor="company-address">Dirección</Label>
+                    <Input 
+                      id="company-address"
+                      value={companyInfo.address}
+                      onChange={(e) => setCompanyInfo({ ...companyInfo, address: e.target.value })}
+                      placeholder="Calle Principal 123"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="company-city">Ciudad</Label>
+                    <Input 
+                      id="company-city"
+                      value={companyInfo.city}
+                      onChange={(e) => setCompanyInfo({ ...companyInfo, city: e.target.value })}
+                      placeholder="Madrid"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="company-postal">Código postal</Label>
+                    <Input 
+                      id="company-postal"
+                      value={companyInfo.postal_code}
+                      onChange={(e) => setCompanyInfo({ ...companyInfo, postal_code: e.target.value })}
+                      placeholder="28001"
+                    />
+                  </div>
+
+                  <div className="md:col-span-2 space-y-2">
+                    <Label htmlFor="company-description">Descripción</Label>
+                    <Textarea
+                      id="company-description"
+                      value={companyInfo.description}
+                      onChange={(e) => setCompanyInfo({ ...companyInfo, description: e.target.value })}
+                      placeholder="Describe brevemente tu empresa y sus principales actividades..."
+                      rows={4}
+                    />
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label>Sede principal</Label>
-                  <Input defaultValue={profile?.region ?? ''} placeholder="Ciudad / Región" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Correo de contacto</Label>
-                  <Input type="email" defaultValue={user?.email ?? ''} placeholder="contacto@empresa.com" />
-                </div>
-                <div className="space-y-2 md:col-span-2">
-                  <Label>Descripción breve</Label>
-                  <textarea
-                    className="w-full border rounded-md p-2 text-sm"
-                    rows={3}
-                    placeholder="Describe brevemente tu empresa y sus principales operaciones"
-                  />
-                </div>
-                <div className="md:col-span-2">
-                  <Button type="submit">Guardar datos de la empresa</Button>
+
+                <div className="flex justify-end">
+                  <Button type="submit" disabled={isSavingCompany}>
+                    {isSavingCompany ? 'Guardando...' : 'Guardar cambios'}
+                  </Button>
                 </div>
               </form>
             </CardContent>
