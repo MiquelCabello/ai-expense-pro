@@ -300,6 +300,24 @@ export default function ConfigurationPage() {
     loadData();
   }, [loadData]);
 
+  // Actualizar companyInfo cuando companyV2 cambie
+  useEffect(() => {
+    if (companyV2) {
+      setCompanyInfo({
+        name: companyV2.name || '',
+        tax_id: companyV2.tax_id || '',
+        address: companyV2.address || '',
+        city: companyV2.city || '',
+        postal_code: companyV2.postal_code || '',
+        phone: companyV2.phone || '',
+        email: companyV2.email || '',
+        website: companyV2.website || '',
+        description: companyV2.description || '',
+        logo_url: companyV2.logo_url || '',
+      });
+    }
+  }, [companyV2]);
+
   const saveCompanyProfile = async (event: React.FormEvent) => {
     event.preventDefault();
 
@@ -385,11 +403,10 @@ export default function ConfigurationPage() {
 
       if (updateError) throw updateError;
 
+      // Actualizar el estado local inmediatamente
       setCompanyInfo(prev => ({ ...prev, logo_url: publicUrl }));
-      toast.success('Logo actualizado correctamente');
       
-      // Recargar datos para refrescar todo
-      await loadData();
+      toast.success('Logo actualizado correctamente');
     } catch (error) {
       console.error('Error uploading logo:', error);
       toast.error('Error al subir el logo');
