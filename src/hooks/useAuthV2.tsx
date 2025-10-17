@@ -30,6 +30,7 @@ export interface Membership {
 export interface ProfileV2 {
   user_id: string;
   email: string;
+  name?: string;
 }
 
 interface AuthV2ContextType {
@@ -82,7 +83,14 @@ export function AuthV2Provider({ children }: { children: ReactNode }) {
           return null;
         }
 
-        // 2. Intentar cargar membership + company
+        // 2. Intentar obtener el nombre desde profiles (sistema antiguo)
+        const { data: oldProfile } = await supabase
+          .from('profiles')
+          .select('name')
+          .eq('user_id', currentUser.id)
+          .maybeSingle();
+
+        // 3. Intentar cargar membership + company
         const { data: membershipData, error: membershipError } = await supabase
           .from('memberships')
           .select(`
@@ -117,7 +125,10 @@ export function AuthV2Provider({ children }: { children: ReactNode }) {
         console.log('[AuthV2] Successfully loaded data from new system');
         
         return {
-          profileV2: profile,
+          profileV2: {
+            ...profile,
+            name: oldProfile?.name
+          },
           membership: {
             user_id: membershipData.user_id,
             company_id: membershipData.company_id,
@@ -188,6 +199,7 @@ export function AuthV2Provider({ children }: { children: ReactNode }) {
         const mappedProfile: ProfileV2 = {
           user_id: currentUser.id,
           email: currentUser.email ?? '',
+          name: profile.name,
         };
 
         return {

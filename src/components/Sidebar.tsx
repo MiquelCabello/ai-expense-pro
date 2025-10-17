@@ -19,7 +19,7 @@ import {
 import { useLocation, useNavigate } from 'react-router-dom';
 
 export default function Sidebar() {
-  const { user, company, membership, isMaster, signOut } = useAuthV2();
+  const { user, company, membership, isMaster, signOut, profileV2 } = useAuthV2();
   const location = useLocation();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
@@ -37,6 +37,7 @@ export default function Sidebar() {
 
   const isAdmin = membership?.role !== 'employee' || isMaster;
   const companyName = company?.name || 'Mi Empresa';
+  const userName = profileV2?.name || user?.email?.split('@')[0] || 'Usuario';
 
   const navigation = [
     {
@@ -70,12 +71,7 @@ export default function Sidebar() {
         icon: Users,
         current: location.pathname === '/empleados'
       }]
-      : [{
-        name: companyName,
-        href: '/empresa',
-        icon: Building2,
-        current: location.pathname === '/empresa'
-      }]),
+      : []),
     ...(isAdmin
       ? [{
         name: 'Configuración',
@@ -158,14 +154,12 @@ export default function Sidebar() {
         <div className="flex items-center space-x-3 mb-3">
           <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
             <span className="text-sm font-medium text-primary-foreground">
-              {user?.email?.charAt(0)?.toUpperCase() || 'U'}
+              {userName?.charAt(0)?.toUpperCase() || 'U'}
             </span>
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">{user?.email || 'Usuario'}</p>
-            <p className="text-xs text-muted-foreground">
-              {isAdmin ? 'Director Financiero' : 'Empleado'}
-            </p>
+            <p className="text-sm font-medium truncate">{userName}</p>
+            <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
           </div>
         </div>
         <Button 
