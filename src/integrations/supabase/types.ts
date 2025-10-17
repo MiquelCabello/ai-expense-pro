@@ -160,6 +160,89 @@ export type Database = {
         }
         Relationships: []
       }
+      companies: {
+        Row: {
+          category_limit: number | null
+          created_at: string
+          department_admin_limit: number | null
+          global_admin_limit: number | null
+          id: string
+          max_employees: number | null
+          migrated_from_account_id: string | null
+          migration_status: string | null
+          monthly_expense_limit: number | null
+          name: string
+          owner_user_id: string
+          plan: Database["public"]["Enums"]["plan_tier"]
+          updated_at: string
+        }
+        Insert: {
+          category_limit?: number | null
+          created_at?: string
+          department_admin_limit?: number | null
+          global_admin_limit?: number | null
+          id?: string
+          max_employees?: number | null
+          migrated_from_account_id?: string | null
+          migration_status?: string | null
+          monthly_expense_limit?: number | null
+          name: string
+          owner_user_id: string
+          plan?: Database["public"]["Enums"]["plan_tier"]
+          updated_at?: string
+        }
+        Update: {
+          category_limit?: number | null
+          created_at?: string
+          department_admin_limit?: number | null
+          global_admin_limit?: number | null
+          id?: string
+          max_employees?: number | null
+          migrated_from_account_id?: string | null
+          migration_status?: string | null
+          monthly_expense_limit?: number | null
+          name?: string
+          owner_user_id?: string
+          plan?: Database["public"]["Enums"]["plan_tier"]
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      departments: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          migrated_from_account_department_id: string | null
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          migrated_from_account_department_id?: string | null
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          migrated_from_account_department_id?: string | null
+          name?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "departments_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       expenses: {
         Row: {
           account_id: string | null
@@ -362,6 +445,54 @@ export type Database = {
         }
         Relationships: []
       }
+      memberships: {
+        Row: {
+          company_id: string
+          created_at: string
+          department_id: string | null
+          migrated_from_profile_id: string | null
+          migrated_from_user_role_id: string | null
+          role: Database["public"]["Enums"]["role_type"]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          department_id?: string | null
+          migrated_from_profile_id?: string | null
+          migrated_from_user_role_id?: string | null
+          role: Database["public"]["Enums"]["role_type"]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          department_id?: string | null
+          migrated_from_profile_id?: string | null
+          migrated_from_user_role_id?: string | null
+          role?: Database["public"]["Enums"]["role_type"]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "memberships_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memberships_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           account_id: string | null
@@ -418,6 +549,27 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      profiles_v2: {
+        Row: {
+          created_at: string
+          email: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       project_codes: {
         Row: {
@@ -529,7 +681,15 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      migration_status_v1: {
+        Row: {
+          migrated_count: number | null
+          migration: string | null
+          pending_count: number | null
+          total_original: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       check_plan_limits: {
@@ -603,7 +763,14 @@ export type Database = {
       expense_source: "MANUAL" | "AI_EXTRACTED"
       expense_status: "PENDING" | "APPROVED" | "REJECTED"
       payment_method: "CARD" | "CASH" | "TRANSFER" | "OTHER"
+      plan_tier: "free" | "pro" | "enterprise"
       project_status: "ACTIVE" | "INACTIVE"
+      role_type:
+        | "owner"
+        | "employee"
+        | "company_admin"
+        | "department_admin"
+        | "global_admin"
       user_role: "ADMIN" | "EMPLOYEE" | "DEPARTMENT_ADMIN"
       user_role_type:
         | "account_owner"
@@ -744,7 +911,15 @@ export const Constants = {
       expense_source: ["MANUAL", "AI_EXTRACTED"],
       expense_status: ["PENDING", "APPROVED", "REJECTED"],
       payment_method: ["CARD", "CASH", "TRANSFER", "OTHER"],
+      plan_tier: ["free", "pro", "enterprise"],
       project_status: ["ACTIVE", "INACTIVE"],
+      role_type: [
+        "owner",
+        "employee",
+        "company_admin",
+        "department_admin",
+        "global_admin",
+      ],
       user_role: ["ADMIN", "EMPLOYEE", "DEPARTMENT_ADMIN"],
       user_role_type: [
         "account_owner",
