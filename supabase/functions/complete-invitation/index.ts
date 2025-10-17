@@ -234,14 +234,25 @@ serve(async (req) => {
       }
 
       // 4. Crear membership
-      const membershipRole = invitation.role === 'ADMIN' ? 'company_admin' : 'employee';
+      let membershipRole: 'owner' | 'global_admin' | 'company_admin' | 'department_admin' | 'employee';
+      if (invitation.role === 'ADMIN') {
+        membershipRole = 'company_admin';
+      } else if (invitation.role === 'DEPARTMENT_ADMIN') {
+        membershipRole = 'department_admin';
+      } else {
+        membershipRole = 'employee';
+      }
+
+      // Solo asignar department_id si es department_admin
+      const finalDepartmentId = (membershipRole === 'department_admin' && departmentId) ? departmentId : null;
+      
       const { error: membershipError } = await adminClient
         .from('memberships')
         .insert({
           user_id: userId,
           company_id: company.id,
           role: membershipRole,
-          department_id: departmentId,
+          department_id: finalDepartmentId,
           migrated_from_profile_id: null, // Nuevo usuario, no migrado
         });
 
