@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -12,22 +12,15 @@ const jsonHeaders = {
 };
 
 serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL');
-    const supabaseServiceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-
-    if (!supabaseUrl || !supabaseServiceRoleKey) {
-      throw new Error('Missing environment variables');
-    }
-
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseServiceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
 
-    // Authenticate the requesting user
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
       return new Response(
@@ -46,21 +39,25 @@ serve(async (req) => {
       );
     }
 
-    // Verify admin role
-    const { data: profile, error: profileError } = await supabaseAdmin
-      .from('profiles')
-      .select('role, account_id')
+    // Verificar rol de admin usando el sistema nuevo
+    const { data: membership } = await supabaseAdmin
+      .from('memberships')
+      .select('role, company_id')
       .eq('user_id', user.id)
       .single();
 
-    if (profileError || profile?.role !== 'ADMIN') {
+    const isAdmin = membership?.role === 'owner' || 
+                    membership?.role === 'company_admin' || 
+                    membership?.role === 'global_admin';
+
+    if (!isAdmin) {
       return new Response(
         JSON.stringify({ error: 'Only admins can manage employees' }),
         { status: 403, headers: jsonHeaders }
       );
     }
 
-    const { action, employeeUserId, name, password } = await req.json();
+    const { action, employeeUserId, name, password, companyId } = await req.json();
 
     if (!action || !employeeUserId) {
       return new Response(
@@ -69,54 +66,42 @@ serve(async (req) => {
       );
     }
 
-    // Verify employee belongs to same account
-    const { data: employeeProfile } = await supabaseAdmin
-      .from('profiles')
-      .select('account_id')
+    const targetCompanyId = companyId || membership.company_id;
+
+    // Verificar que el empleado pertenece a la empresa
+    const { data: employeeMembership } = await supabaseAdmin
+      .from('memberships')
+      .select('*')
       .eq('user_id', employeeUserId)
+      .eq('company_id', targetCompanyId)
       .single();
 
-    if (!employeeProfile || employeeProfile.account_id !== profile.account_id) {
+    if (!employeeMembership) {
       return new Response(
-        JSON.stringify({ error: 'Employee not found or not in your account' }),
+        JSON.stringify({ error: 'Employee not found or not in your company' }),
         { status: 404, headers: jsonHeaders }
       );
     }
 
     if (action === 'update') {
-      // Update name if provided
       if (name) {
-        const { error: updateError } = await supabaseAdmin
-          .from('profiles')
-          .update({ name: name.trim() })
-          .eq('user_id', employeeUserId);
-
-        if (updateError) throw updateError;
-
-        // === DUAL WRITE: Update in new system ===
-        try {
-          const { data: company } = await supabaseAdmin
-            .from('companies')
-            .select('id')
-            .eq('migrated_from_account_id', employeeProfile.account_id)
-            .maybeSingle();
-
-          if (company) {
-            console.log('[manage-employee] Name updated in old system, new system has no equivalent name field in memberships');
-          }
-        } catch (error) {
-          console.warn('[manage-employee] Dual write check failed for name update:', error);
-        }
+        // No hay campo name en profiles_v2, se usa email
+        console.log('[manage-employee] Name field not used in new system');
       }
 
-      // Update password if provided
       if (password) {
         const { error: passwordError } = await supabaseAdmin.auth.admin.updateUserById(
           employeeUserId,
           { password }
         );
 
-        if (passwordError) throw passwordError;
+        if (passwordError) {
+          console.error('[manage-employee] Error updating password:', passwordError);
+          return new Response(JSON.stringify({ error: 'Error al actualizar contraseña' }), {
+            status: 400,
+            headers: jsonHeaders,
+          });
+        }
       }
 
       return new Response(
@@ -124,61 +109,38 @@ serve(async (req) => {
         { status: 200, headers: jsonHeaders }
       );
     } else if (action === 'delete') {
-      // === DUAL WRITE: Delete from new system first ===
-      try {
-        const { data: company } = await supabaseAdmin
-          .from('companies')
-          .select('id')
-          .eq('migrated_from_account_id', employeeProfile.account_id)
-          .maybeSingle();
+      // Eliminar membership
+      const { error: membershipError } = await supabaseAdmin
+        .from('memberships')
+        .delete()
+        .eq('user_id', employeeUserId)
+        .eq('company_id', targetCompanyId);
 
-        if (company) {
-          // Delete membership
-          const { error: membershipDeleteError } = await supabaseAdmin
-            .from('memberships')
-            .delete()
-            .eq('user_id', employeeUserId)
-            .eq('company_id', company.id);
-
-          if (membershipDeleteError) {
-            console.warn('[manage-employee] Failed to delete membership:', membershipDeleteError);
-          } else {
-            console.log('[manage-employee] Deleted membership for user:', employeeUserId);
-          }
-
-          // Delete profiles_v2
-          const { error: profileV2DeleteError } = await supabaseAdmin
-            .from('profiles_v2')
-            .delete()
-            .eq('user_id', employeeUserId);
-
-          if (profileV2DeleteError) {
-            console.warn('[manage-employee] Failed to delete profiles_v2:', profileV2DeleteError);
-          } else {
-            console.log('[manage-employee] Deleted profiles_v2 for user:', employeeUserId);
-          }
-        }
-      } catch (error) {
-        console.warn('[manage-employee] Dual write failed for delete:', error);
+      if (membershipError) {
+        console.error('[manage-employee] Error deleting membership:', membershipError);
+        return new Response(JSON.stringify({ error: 'Error al eliminar empleado' }), {
+          status: 500,
+          headers: jsonHeaders,
+        });
       }
 
-      // Delete user (cascade will delete profile)
-      const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(
-        employeeUserId
-      );
+      // Eliminar usuario
+      const { error: deleteUserError } = await supabaseAdmin.auth.admin.deleteUser(employeeUserId);
 
-      if (deleteError) throw deleteError;
+      if (deleteUserError) {
+        console.error('[manage-employee] Error deleting user:', deleteUserError);
+      }
 
       return new Response(
         JSON.stringify({ success: true, message: 'Employee deleted successfully' }),
         { status: 200, headers: jsonHeaders }
       );
-    } else {
-      return new Response(
-        JSON.stringify({ error: 'Invalid action' }),
-        { status: 400, headers: jsonHeaders }
-      );
     }
+
+    return new Response(
+      JSON.stringify({ error: 'Invalid action' }),
+      { status: 400, headers: jsonHeaders }
+    );
   } catch (error: any) {
     console.error('[manage-employee] Error:', error);
     return new Response(

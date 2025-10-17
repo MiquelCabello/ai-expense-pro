@@ -4,9 +4,6 @@ import { supabase } from '@/integrations/supabase/client';
 
 const OWNER_EMAIL = 'info@miquelcabello.com';
 
-const isOwnerEmail = (email?: string | null) => (email ?? '').toLowerCase() === OWNER_EMAIL;
-
-// Tipos del nuevo sistema
 export interface Company {
   id: string;
   name: string;
@@ -51,9 +48,6 @@ interface AuthV2ContextType {
   loading: boolean;
   isMaster: boolean;
   signOut: () => Promise<void>;
-  
-  // Flags para debugging
-  usingNewSystem: boolean;
 }
 
 const AuthV2Context = createContext<AuthV2ContextType | undefined>(undefined);
@@ -65,285 +59,111 @@ export function AuthV2Provider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profileV2, setProfileV2] = useState<ProfileV2 | null>(null);
   const [loading, setLoading] = useState(true);
-  const [usingNewSystem, setUsingNewSystem] = useState(false);
+  const [isMaster, setIsMaster] = useState(false);
 
-  useEffect(() => {
-    let mounted = true;
+  async function loadUserData(currentUser: User) {
+    try {
+      console.log('[AuthV2] Loading user data for:', currentUser.id);
 
-    const clearState = () => {
-      if (!mounted) return;
+      const { data: profile } = await supabase
+        .from('profiles_v2')
+        .select('*')
+        .eq('user_id', currentUser.id)
+        .maybeSingle();
+
+      setProfileV2(profile);
+
+      const { data: memberships } = await supabase
+        .from('memberships')
+        .select('*')
+        .eq('user_id', currentUser.id);
+
+      const userMembership = memberships?.[0] || null;
+      setMembership(userMembership);
+
+      if (userMembership?.company_id) {
+        const { data: companyData } = await supabase
+          .from('companies')
+          .select('*')
+          .eq('id', userMembership.company_id)
+          .single();
+
+        setCompany(companyData);
+      }
+
+      const email = currentUser.email?.toLowerCase();
+      setIsMaster(email === OWNER_EMAIL);
+
+      console.log('[AuthV2] Data loaded successfully');
+    } catch (error) {
+      console.error('[AuthV2] Error loading data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function syncSession(nextSession: Session | null) {
+    console.log('[AuthV2] Syncing session:', nextSession ? 'authenticated' : 'unauthenticated');
+    
+    setSession(nextSession);
+    setUser(nextSession?.user ?? null);
+
+    if (!nextSession?.user) {
       setCompany(null);
       setMembership(null);
       setProfileV2(null);
-      setUsingNewSystem(false);
-    };
+      setIsMaster(false);
+      setLoading(false);
+      return;
+    }
 
-    const loadNewSystemData = async (currentUser: User) => {
-      try {
-        // 1. Intentar cargar profile_v2
-        const { data: profile, error: profileError } = await supabase
-          .from('profiles_v2')
-          .select('*')
-          .eq('user_id', currentUser.id)
-          .maybeSingle();
+    await loadUserData(nextSession.user);
+  }
 
-        if (profileError) {
-          console.warn('[AuthV2] No profile_v2 found, falling back to old system');
-          return null;
-        }
+  useEffect(() => {
+    console.log('[AuthV2] Initializing...');
 
-        // 2. Intentar obtener el nombre desde profiles (sistema antiguo)
-        const { data: oldProfile } = await supabase
-          .from('profiles')
-          .select('name')
-          .eq('user_id', currentUser.id)
-          .maybeSingle();
-
-        // 3. Intentar cargar membership + company
-        const { data: membershipData, error: membershipError } = await supabase
-          .from('memberships')
-          .select(`
-            *,
-            companies (
-              id,
-              name,
-              plan,
-              owner_user_id,
-              max_employees,
-              monthly_expense_limit,
-              category_limit,
-              global_admin_limit,
-              department_admin_limit,
-              tax_id,
-              address,
-              city,
-              postal_code,
-              phone,
-              email,
-              website,
-              description,
-              logo_url
-            )
-          `)
-          .eq('user_id', currentUser.id)
-          .maybeSingle();
-
-        if (membershipError || !membershipData) {
-          console.warn('[AuthV2] No membership found, falling back to old system');
-          return null;
-        }
-
-        // Datos cargados exitosamente del nuevo sistema
-        const companyData = (membershipData as any).companies;
-        if (!companyData) {
-          console.warn('[AuthV2] Membership exists but no company found');
-          return null;
-        }
-
-        console.log('[AuthV2] Successfully loaded data from new system');
-        
-        return {
-          profileV2: {
-            ...profile,
-            name: oldProfile?.name
-          },
-          membership: {
-            user_id: membershipData.user_id,
-            company_id: membershipData.company_id,
-            role: membershipData.role,
-            department_id: membershipData.department_id,
-            created_at: membershipData.created_at,
-          } as Membership,
-          company: companyData as Company,
-        };
-      } catch (error) {
-        console.error('[AuthV2] Error loading new system data:', error);
-        return null;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('[AuthV2] Auth state changed:', event);
+        await syncSession(session);
       }
-    };
+    );
 
-    const loadOldSystemData = async (currentUser: User) => {
-      try {
-        const { data: profile, error: profileError } = await supabase
-          .from('profiles')
-          .select(`
-            *,
-            accounts (
-              id,
-              name,
-              plan,
-              owner_user_id,
-              max_employees,
-              monthly_expense_limit
-            )
-          `)
-          .eq('user_id', currentUser.id)
-          .maybeSingle();
-
-        if (profileError || !profile) {
-          console.warn('[AuthV2] No profile found in old system');
-          return null;
-        }
-
-        const accountData = (profile as any).accounts;
-        if (!accountData) {
-          console.warn('[AuthV2] Profile exists but no account found');
-          return null;
-        }
-
-        console.log('[AuthV2] Using data from old system (fallback)');
-
-        // Transformar al formato nuevo
-        const mappedCompany: Company = {
-          id: accountData.id,
-          name: accountData.name,
-          plan: accountData.plan.toLowerCase() as 'free' | 'pro' | 'enterprise',
-          owner_user_id: accountData.owner_user_id,
-          max_employees: accountData.max_employees,
-          monthly_expense_limit: accountData.monthly_expense_limit,
-          category_limit: null,
-          global_admin_limit: null,
-          department_admin_limit: null,
-        };
-
-        const mappedMembership: Membership = {
-          user_id: profile.user_id,
-          company_id: accountData.id,
-          role: profile.role === 'ADMIN' ? 'owner' : 'employee',
-          department_id: null,
-          created_at: profile.created_at,
-        };
-
-        const mappedProfile: ProfileV2 = {
-          user_id: currentUser.id,
-          email: currentUser.email ?? '',
-          name: profile.name,
-        };
-
-        return {
-          profileV2: mappedProfile,
-          membership: mappedMembership,
-          company: mappedCompany,
-        };
-      } catch (error) {
-        console.error('[AuthV2] Error loading old system data:', error);
-        return null;
-      }
-    };
-
-    const syncSession = async (nextSession: Session | null) => {
-      if (!mounted) return;
-
-      setSession(nextSession);
-      setUser(nextSession?.user ?? null);
-
-      const activeUser = nextSession?.user;
-      if (!activeUser) {
-        clearState();
-        setLoading(false);
-        return;
-      }
-
-      setLoading(true);
-      try {
-        // Intentar cargar del nuevo sistema primero
-        const newSystemData = await loadNewSystemData(activeUser);
-
-        if (newSystemData) {
-          // Usar datos del nuevo sistema
-          setProfileV2(newSystemData.profileV2);
-          setMembership(newSystemData.membership);
-          setCompany(newSystemData.company);
-          setUsingNewSystem(true);
-        } else {
-          // Fallback al sistema antiguo
-          const oldSystemData = await loadOldSystemData(activeUser);
-
-          if (oldSystemData) {
-            setProfileV2(oldSystemData.profileV2);
-            setMembership(oldSystemData.membership);
-            setCompany(oldSystemData.company);
-            setUsingNewSystem(false);
-          } else {
-            // No hay datos en ningún sistema
-            clearState();
-          }
-        }
-      } catch (error) {
-        console.error('[AuthV2] Failed to sync session', error);
-        clearState();
-      } finally {
-        if (mounted) {
-          setLoading(false);
-        }
-      }
-    };
-
-    const authListener = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      void syncSession(nextSession);
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      syncSession(session);
     });
-    const subscription = authListener?.data?.subscription;
-
-    const initializeSession = async () => {
-      try {
-        const { data, error } = await supabase.auth.getSession();
-        if (!mounted) return;
-
-        if (error) throw error;
-
-        await syncSession(data.session ?? null);
-      } catch (error) {
-        console.error('[AuthV2] Failed to initialize session', error);
-        if (!mounted) return;
-
-        clearState();
-        setSession(null);
-        setUser(null);
-        setLoading(false);
-
-        try {
-          await supabase.auth.signOut();
-        } catch (signOutError) {
-          console.warn('[AuthV2] Failed to sign out after initialization error', signOutError);
-        }
-      }
-    };
-
-    void initializeSession();
 
     return () => {
-      mounted = false;
-      subscription?.unsubscribe();
+      console.log('[AuthV2] Cleaning up subscription');
+      subscription.unsubscribe();
     };
   }, []);
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    console.log('[AuthV2] Signing out...');
     setCompany(null);
     setMembership(null);
-    setProfileV2(null);
-    setSession(null);
     setUser(null);
-    setUsingNewSystem(false);
-    setLoading(false);
-  };
-
-  const isMaster = isOwnerEmail(user?.email);
-
-  const value = {
-    company,
-    membership,
-    user,
-    session,
-    profileV2,
-    loading,
-    isMaster,
-    usingNewSystem,
-    signOut,
+    setSession(null);
+    setProfileV2(null);
+    setIsMaster(false);
+    await supabase.auth.signOut();
   };
 
   return (
-    <AuthV2Context.Provider value={value}>
+    <AuthV2Context.Provider
+      value={{
+        company,
+        membership,
+        user,
+        session,
+        profileV2,
+        loading,
+        isMaster,
+        signOut,
+      }}
+    >
       {children}
     </AuthV2Context.Provider>
   );
