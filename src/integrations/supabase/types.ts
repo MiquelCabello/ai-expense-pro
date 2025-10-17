@@ -681,6 +681,15 @@ export type Database = {
       }
     }
     Views: {
+      migration_status_detailed: {
+        Row: {
+          entidad: string | null
+          migrados: number | null
+          porcentaje_completado: number | null
+          total_original: number | null
+        }
+        Relationships: []
+      }
       migration_status_v1: {
         Row: {
           migrated_count: number | null
