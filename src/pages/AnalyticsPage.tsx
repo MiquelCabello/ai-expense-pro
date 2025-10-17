@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { useAuth } from '@/hooks/useAuth'
+import { useAuthV2 } from '@/hooks/useAuthV2'
 import { supabase } from '@/integrations/supabase/client'
 import AppLayout from '@/components/AppLayout'
 import { toLocalISODate, aggregateAnalytics } from '@/lib/analytics'
@@ -22,8 +22,8 @@ interface AnalyticsData {
 }
 
 export default function AnalyticsPage() {
-  const { profile } = useAuth()
-  const accountId = profile?.account_id ?? null
+  const { company } = useAuthV2()
+  const accountId = company?.id ?? null
   const [analytics, setAnalytics] = useState<AnalyticsData>({
     totalExpenses: 0,
     expenseCount: 0,

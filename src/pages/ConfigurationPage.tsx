@@ -13,7 +13,6 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import AppLayout from '@/components/AppLayout';
-import { useAuth } from '@/hooks/useAuth';
 import { useAuthV2 } from '@/hooks/useAuthV2';
 import { useTheme } from '@/components/ThemeProvider';
 import { Settings, Euro, Globe, Clock, Palette, FolderOpen, Briefcase, Plus, Edit2, Trash2, Building2, Upload, Image as ImageIcon } from 'lucide-react';
@@ -45,8 +44,7 @@ const isValidThemePreference = (value: unknown): value is 'light' | 'dark' | 'sy
   value === 'light' || value === 'dark' || value === 'system';
 
 export default function ConfigurationPage() {
-  const { profile, account, isMaster, user } = useAuth();
-  const { company: companyV2 } = useAuthV2();
+  const { company, isMaster, user } = useAuthV2();
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
   const [categories, setCategories] = useState<Category[]>([]);

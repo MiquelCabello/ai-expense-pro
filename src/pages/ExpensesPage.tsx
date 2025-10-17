@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useAuth } from '@/hooks/useAuth';
+import { useAuthV2 } from '@/hooks/useAuthV2';
 import { supabase } from '@/integrations/supabase/client';
 import AppLayout from '@/components/AppLayout';
 import { 
@@ -37,14 +37,14 @@ interface Expense {
 }
 
 export default function ExpensesPage() {
-  const { profile, account, isMaster } = useAuth();
-  const planMonthlyLimitMap: Record<'FREE' | 'PROFESSIONAL' | 'ENTERPRISE', number | null> = {
-    FREE: 50,
-    PROFESSIONAL: null,
-    ENTERPRISE: null,
+  const { company, isMaster } = useAuthV2();
+  const planMonthlyLimitMap: Record<'free' | 'pro' | 'enterprise', number | null> = {
+    free: 50,
+    pro: null,
+    enterprise: null,
   };
-  const planKey = (account?.plan ?? 'FREE') as 'FREE' | 'PROFESSIONAL' | 'ENTERPRISE';
-  const resolvedAccountId = !isMaster ? (profile?.account_id ?? account?.id ?? undefined) : undefined;
+  const planKey = (company?.plan ?? 'free') as 'free' | 'pro' | 'enterprise';
+  const resolvedAccountId = !isMaster ? (company?.id ?? undefined) : undefined;
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');

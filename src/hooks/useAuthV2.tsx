@@ -135,16 +135,19 @@ export function AuthV2Provider({ children }: { children: ReactNode }) {
       return;
     }
 
-    await loadUserData(nextSession.user);
+    // Defer Supabase calls to avoid deadlock
+    setTimeout(() => {
+      loadUserData(nextSession.user);
+    }, 0);
   }
 
   useEffect(() => {
     console.log('[AuthV2] Initializing...');
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      (event, session) => {
         console.log('[AuthV2] Auth state changed:', event);
-        await syncSession(session);
+        syncSession(session);
       }
     );
 

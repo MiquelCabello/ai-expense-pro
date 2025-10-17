@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
-import { useAuth } from '@/hooks/useAuth'
+import { useAuthV2 } from '@/hooks/useAuthV2'
 import { supabase } from '@/integrations/supabase/client'
 import type { TablesInsert } from '@/integrations/supabase/types'
 import { toast } from 'sonner'
@@ -170,14 +170,12 @@ const normalizeAIResponse = (raw: any): ExtractedData => {
 }
 
 export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) {
-  const { user, profile, account, isMaster } = useAuth()
+  const { user, membership, company, isMaster } = useAuthV2()
 
   const isAdmin = useMemo(() => {
-    const roleStr = (profile as any)?.role ? String((profile as any).role).toLowerCase() : ''
-    const flag = (profile as any)?.is_admin === true
-    const roles = (user?.app_metadata?.roles as string[] | undefined) ?? []
-    return flag || roleStr.includes('admin') || roleStr.includes('administrador') || roleStr.includes('owner') || roles.includes('admin') || roles.includes('owner')
-  }, [profile, user])
+    if (isMaster) return true
+    return membership?.role === 'owner' || membership?.role === 'company_admin' || membership?.role === 'global_admin'
+  }, [membership, isMaster])
 
   const [step, setStep] = useState<'upload' | 'review'>('upload')
   const [modalOpen, setModalOpen] = useState(false)
@@ -194,14 +192,14 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
   const [aiClassification, setAiClassification] = useState<ClassificationResult | null>(null)
 
   const [selfEmployee, setSelfEmployee] = useState<any | null>(null)
-  const [accountId, setAccountId] = useState<string | null>(profile?.account_id ?? account?.id ?? null)
+  const [accountId, setAccountId] = useState<string | null>(company?.id ?? null)
   const [projects_list, setProjectsList] = useState<any[]>([])
   const [employees_list, setEmployeesList] = useState<any[]>([])
   const [categories_list, setCategoriesList] = useState<any[]>([])
   const [categoryIndex, setCategoryIndex] = useState<Record<string, string>>({})
   const [monthlyUsage, setMonthlyUsage] = useState<number | null>(null)
-  const monthlyLimit = typeof account?.monthly_expense_limit === 'number' ? account.monthly_expense_limit : null
-  const monthlyLimitKey = account?.monthly_expense_limit ?? null
+  const monthlyLimit = typeof company?.monthly_expense_limit === 'number' ? company.monthly_expense_limit : null
+  const monthlyLimitKey = company?.monthly_expense_limit ?? null
   const limitApplies = !isMaster && typeof monthlyLimit === 'number'
   const hasReachedMonthlyLimit = limitApplies && monthlyLimit !== null && typeof monthlyUsage === 'number' && monthlyUsage >= monthlyLimit
   const remainingMonthlySlots = limitApplies && monthlyLimit !== null && typeof monthlyUsage === 'number'
@@ -220,8 +218,8 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
   ) : null
 
   React.useEffect(() => {
-    setAccountId(profile?.account_id ?? account?.id ?? null)
-  }, [profile?.account_id, account?.id])
+    setAccountId(company?.id ?? null)
+  }, [company?.id])
 
   React.useEffect(() => {
     if (!limitApplies || !accountId) {
