@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useAuth } from '@/hooks/useAuth';
+import { useAuthV2 } from '@/hooks/useAuthV2';
 import { supabase } from '@/integrations/supabase/client';
 import AppLayout from '@/components/AppLayout';
 import { 
@@ -37,36 +37,25 @@ interface Expense {
 }
 
 export default function ExpensesPage() {
-  const { profile, account, isMaster } = useAuth();
-  const planMonthlyLimitMap: Record<'FREE' | 'PROFESSIONAL' | 'ENTERPRISE', number | null> = {
-    FREE: 50,
-    PROFESSIONAL: null,
-    ENTERPRISE: null,
+  const { company, isMaster, membership, user } = useAuthV2();
+  const planMonthlyLimitMap: Record<'free' | 'pro' | 'enterprise', number | null> = {
+    free: 50,
+    pro: null,
+    enterprise: null,
   };
-  const planKey = (account?.plan ?? 'FREE') as 'FREE' | 'PROFESSIONAL' | 'ENTERPRISE';
-  const resolvedAccountId = !isMaster ? (profile?.account_id ?? account?.id ?? undefined) : undefined;
+  const planKey = (company?.plan ?? 'free') as 'free' | 'pro' | 'enterprise';
+  const resolvedAccountId = !isMaster ? (company?.id ?? undefined) : undefined;
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
   const fetchExpenses = useCallback(async () => {
-    if (!profile && !isMaster) {
+    if (!isMaster && !resolvedAccountId) {
+      console.warn('[Expenses] Missing company_id for non-master user');
+      setExpenses([]);
       setLoading(false);
       return;
-    }
-
-    if (!isMaster) {
-      if (!profile) {
-        setLoading(false);
-        return;
-      }
-      if (!resolvedAccountId) {
-        console.warn('[Expenses] Missing account_id for non-master user', profile?.id);
-        setExpenses([]);
-        setLoading(false);
-        return;
-      }
     }
 
     try {
@@ -85,8 +74,8 @@ export default function ExpensesPage() {
       }
 
       // If employee, only show their expenses
-      if (!isMaster && profile?.role === 'EMPLOYEE') {
-        query = query.eq('employee_id', profile.user_id);
+      if (!isMaster && membership?.role === 'employee') {
+        query = query.eq('employee_id', user?.id);
       }
 
       const { data: expensesData, error } = await query;
@@ -98,7 +87,8 @@ export default function ExpensesPage() {
 
       // Fetch profiles for employee names (if admin)
       let expensesWithProfiles = resolvedExpenses.map(exp => ({ ...exp, profiles: null }));
-      if ((isMaster || profile?.role === 'ADMIN') && resolvedExpenses.length > 0) {
+      const isAdmin = isMaster || membership?.role === 'owner' || membership?.role === 'company_admin' || membership?.role === 'global_admin';
+      if (isAdmin && resolvedExpenses.length > 0) {
         const employeeIds = Array.from(new Set(resolvedExpenses.map(e => e.employee_id).filter(Boolean)));
         if (employeeIds.length > 0) {
           try {
@@ -132,12 +122,11 @@ export default function ExpensesPage() {
     } finally {
       setLoading(false);
     }
-  }, [profile, resolvedAccountId, isMaster]);
+  }, [membership, resolvedAccountId, isMaster, user]);
 
   useEffect(() => {
-    if (!profile && !isMaster) return;
     fetchExpenses();
-  }, [profile, fetchExpenses, isMaster]);
+  }, [fetchExpenses]);
 
   const getStatusBadge = (status: string) => {
     const statusMap = {
@@ -174,7 +163,7 @@ export default function ExpensesPage() {
     return matchesSearch && matchesStatus;
   });
 
-  const monthlyLimit = isMaster ? null : account?.monthly_expense_limit ?? planMonthlyLimitMap[planKey];
+  const monthlyLimit = isMaster ? null : company?.monthly_expense_limit ?? planMonthlyLimitMap[planKey];
   const currentMonthUsage = expenses.filter(expense => {
     const date = new Date(expense.expense_date);
     const now = new Date();
@@ -289,7 +278,7 @@ export default function ExpensesPage() {
                           <Calendar className="h-3 w-3" />
                           <span>{new Date(expense.expense_date).toLocaleDateString('es-ES')}</span>
                         </div>
-                        {profile?.role === 'ADMIN' && expense.profiles && (
+                        {(isMaster || membership?.role === 'owner' || membership?.role === 'company_admin' || membership?.role === 'global_admin') && expense.profiles && (
                           <div className="flex items-center gap-1">
                             <span>👤</span>
                             <span>{expense.profiles.name}</span>

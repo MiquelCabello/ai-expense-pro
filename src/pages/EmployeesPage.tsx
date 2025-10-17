@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useAuth } from '@/hooks/useAuth';
+import { useAuthV2 } from '@/hooks/useAuthV2';
 import { supabase } from '@/integrations/supabase/client';
 import AppLayout from '@/components/AppLayout';
 import { 
@@ -20,7 +20,8 @@ import {
   Edit,
   Trash2,
   UserCheck,
-  UserX
+  UserX,
+  Copy
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -28,7 +29,7 @@ interface Employee {
   id: string;
   user_id: string;
   name: string;
-  role: 'ADMIN' | 'EMPLOYEE';
+  role: 'ADMIN' | 'EMPLOYEE' | 'DEPARTMENT_ADMIN';
   department?: string | null;
   region?: string | null;
   status: 'ACTIVE' | 'INACTIVE';
@@ -36,31 +37,61 @@ interface Employee {
   account_id: string;
 }
 
+interface Department {
+  id: string;
+  name: string;
+  account_id: string;
+}
+
 export default function EmployeesPage() {
-  const { profile, account } = useAuth();
+  const { membership, company, isMaster, user } = useAuthV2();
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [newEmployee, setNewEmployee] = useState({
     name: '',
     email: '',
-    role: 'EMPLOYEE' as 'ADMIN' | 'EMPLOYEE',
+    role: 'EMPLOYEE' as 'ADMIN' | 'EMPLOYEE' | 'DEPARTMENT_ADMIN',
     department: '',
     region: '',
     status: 'ACTIVE' as 'ACTIVE' | 'INACTIVE'
   });
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
+  const [editForm, setEditForm] = useState({
+    name: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
+  const [invitationUrl, setInvitationUrl] = useState<string | null>(null);
+  const [showInvitationDialog, setShowInvitationDialog] = useState(false);
 
-  const accountId = profile?.account_id ?? null;
-  const maxEmployees = account?.max_employees ?? null;
-  const canAssignRoles = account?.can_assign_roles ?? false;
-  const canAssignDepartment = account?.can_assign_department ?? false;
-  const canAssignRegion = account?.can_assign_region ?? false;
-  const planLabel = account?.plan ?? 'FREE';
-  const planNameMap: Record<string, string> = { FREE: 'Starter', PROFESSIONAL: 'Professional', ENTERPRISE: 'Enterprise' };
+  const accountId = company?.id ?? null;
+  const maxEmployees = company?.max_employees ?? null;
+  const canAssignRoles = true; // Always allow assigning roles in new system
+  const canAssignDepartment = company?.plan === 'enterprise'; // Solo enterprise puede asignar departamentos
+  const canAssignRegion = false; // Deprecated in new system
+  const planLabel = company?.plan ?? 'free';
+  const planNameMap: Record<string, string> = { free: 'Starter', pro: 'Professional', enterprise: 'Enterprise' };
   const planName = planNameMap[planLabel] ?? planLabel;
   const activeEmployeesCount = employees.filter(employee => employee.status === 'ACTIVE').length;
   const isAtEmployeeLimit = typeof maxEmployees === 'number' && activeEmployeesCount >= maxEmployees;
+
+  // Determinar si el usuario es administrador (cualquier tipo)
+  const isAdmin = isMaster || 
+    membership?.role === 'owner' || 
+    membership?.role === 'company_admin' || 
+    membership?.role === 'global_admin' || 
+    membership?.role === 'department_admin';
+  
+  // Determinar el tipo de administrador
+  const isDepartmentAdmin = membership?.role === 'department_admin';
+  const isGlobalAdmin = membership?.role === 'global_admin' || 
+                        membership?.role === 'company_admin' || 
+                        membership?.role === 'owner' ||
+                        isMaster;
 
   useEffect(() => {
     setNewEmployee(prev => ({
@@ -83,6 +114,32 @@ export default function EmployeesPage() {
       if (accountId) {
         query = query.eq('account_id', accountId);
       }
+
+      // Excluir al owner de la lista
+      if (company?.owner_user_id) {
+        query = query.neq('user_id', company.owner_user_id);
+      }
+      
+      // Excluir al usuario actual si es department_admin (no debe verse a sí mismo)
+      if (isDepartmentAdmin && user?.id) {
+        query = query.neq('user_id', user.id);
+      }
+
+    // Si es admin de departamento, solo ver empleados de su departamento
+    // Buscar el departamento del sistema antiguo basándonos en el nombre del departamento del sistema nuevo
+    if (isDepartmentAdmin && membership?.department_id) {
+      // Obtener el nombre del departamento desde el sistema nuevo
+      const { data: newDept } = await supabase
+        .from('departments')
+        .select('name')
+        .eq('id', membership.department_id)
+        .maybeSingle();
+      
+      if (newDept?.name) {
+        console.log('[EmployeesPage] Department admin filter - department name:', newDept.name);
+        query = query.eq('department', newDept.name);
+      }
+    }
 
       const { data, error } = await query;
       let resolvedEmployees = data ?? [];
@@ -107,17 +164,40 @@ export default function EmployeesPage() {
     } finally {
       setLoading(false);
     }
-  }, [accountId]);
+  }, [accountId, isDepartmentAdmin, membership?.department_id, company?.owner_user_id]);
+
+  const fetchDepartments = useCallback(async () => {
+    if (!accountId || !canAssignDepartment) {
+      setDepartments([]);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('account_departments')
+        .select('*')
+        .eq('account_id', accountId)
+        .order('name');
+
+      if (error) throw error;
+
+      setDepartments(data ?? []);
+    } catch (error) {
+      console.error('[Employees] fetch departments failed', error);
+      toast.error('Error cargando departamentos');
+    }
+  }, [accountId, canAssignDepartment]);
 
   useEffect(() => {
-    if (profile?.role === 'ADMIN') {
+    if (isAdmin) {
       fetchEmployees();
+      fetchDepartments();
     }
-  }, [profile, accountId, fetchEmployees]);
+  }, [isAdmin, accountId, fetchEmployees, fetchDepartments]);
 
 
   const handleCreateEmployee = async () => {
-    if (!accountId || profile?.role !== 'ADMIN') {
+    if (!accountId || !isGlobalAdmin) {
       toast.error('No tienes permisos para crear empleados');
       return;
     }
@@ -174,7 +254,15 @@ export default function EmployeesPage() {
         throw new Error(message);
       }
 
-      toast.success('Invitación enviada al nuevo empleado');
+      const result = await response.json();
+      
+      // Show invitation URL
+      if (result.invitation_url) {
+        setInvitationUrl(result.invitation_url);
+        setShowInvitationDialog(true);
+      }
+
+      toast.success('Invitación creada exitosamente');
       setIsCreateDialogOpen(false);
       setNewEmployee({
         name: '',
@@ -209,13 +297,129 @@ export default function EmployeesPage() {
     }
   };
 
+  const handleOpenEditDialog = (employee: Employee) => {
+    setEditingEmployee(employee);
+    setEditForm({
+      name: employee.name,
+      newPassword: '',
+      confirmPassword: ''
+    });
+    setIsEditDialogOpen(true);
+  };
+
+  const handleUpdateEmployee = async () => {
+    if (!editingEmployee || !accountId) return;
+
+    if (!editForm.name.trim()) {
+      toast.error('El nombre no puede estar vacío');
+      return;
+    }
+
+    if (editForm.newPassword && editForm.newPassword !== editForm.confirmPassword) {
+      toast.error('Las contraseñas no coinciden');
+      return;
+    }
+
+    if (editForm.newPassword && editForm.newPassword.length < 8) {
+      toast.error('La contraseña debe tener al menos 8 caracteres');
+      return;
+    }
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) {
+        throw new Error('No hay sesión activa');
+      }
+
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-employee`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          action: 'update',
+          employeeUserId: editingEmployee.user_id,
+          name: editForm.name.trim(),
+          password: editForm.newPassword || undefined
+        })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Error actualizando empleado');
+      }
+
+      toast.success('Empleado actualizado correctamente');
+      setIsEditDialogOpen(false);
+      setEditingEmployee(null);
+      fetchEmployees();
+    } catch (error) {
+      console.error('Error updating employee:', error);
+      toast.error(error instanceof Error ? error.message : 'Error actualizando empleado');
+    }
+  };
+
+  const handleDeleteEmployee = async () => {
+    if (!editingEmployee || !accountId) return;
+
+    if (!confirm(`¿Estás seguro de que quieres eliminar a ${editingEmployee.name}? Esta acción no se puede deshacer.`)) {
+      return;
+    }
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) {
+        throw new Error('No hay sesión activa');
+      }
+
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-employee`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({
+          action: 'delete',
+          employeeUserId: editingEmployee.user_id
+        })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Error eliminando empleado');
+      }
+
+      toast.success('Empleado eliminado correctamente');
+      setIsEditDialogOpen(false);
+      setEditingEmployee(null);
+      fetchEmployees();
+    } catch (error) {
+      console.error('Error deleting employee:', error);
+      toast.error(error instanceof Error ? error.message : 'Error eliminando empleado');
+    }
+  };
+
   const getRoleBadge = (role: string) => {
-    return role === 'ADMIN' ? (
-      <Badge variant="default" className="gap-1">
-        <UserCheck className="h-3 w-3" />
-        Administrador
-      </Badge>
-    ) : (
+    if (role === 'ADMIN') {
+      return (
+        <Badge variant="default" className="gap-1">
+          <UserCheck className="h-3 w-3" />
+          Administrador
+        </Badge>
+      );
+    }
+    if (role === 'DEPARTMENT_ADMIN') {
+      return (
+        <Badge variant="outline" className="gap-1 border-primary text-primary">
+          <Briefcase className="h-3 w-3" />
+          Admin Departamento
+        </Badge>
+      );
+    }
+    return (
       <Badge variant="secondary" className="gap-1">
         <Users className="h-3 w-3" />
         Empleado
@@ -243,8 +447,8 @@ export default function EmployeesPage() {
     employee.region?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // Check if current user is admin
-  if (profile?.role !== 'ADMIN') {
+  // Check if current user is admin (cualquier tipo)
+  if (!isAdmin) {
     return (
       <AppLayout>
         <div className="p-6 flex items-center justify-center min-h-[400px]">
@@ -279,27 +483,34 @@ export default function EmployeesPage() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-3xl font-bold mb-2">Gestión de Empleados</h2>
+            <h2 className="text-3xl font-bold mb-2">
+              {isDepartmentAdmin ? 'Empleados de mi Departamento' : 'Gestión de Empleados'}
+            </h2>
             <p className="text-muted-foreground">
-              Administra usuarios y permisos del sistema
+              {isDepartmentAdmin 
+                ? 'Visualiza los empleados de tu departamento' 
+                : 'Administra usuarios y permisos del sistema'}
             </p>
-            {profile?.role === 'ADMIN' && (
+            {/* Solo mostrar información de planes a global admins */}
+            {isGlobalAdmin && maxEmployees && (
               <p className={`text-sm mt-1 ${isAtEmployeeLimit ? 'text-destructive' : 'text-muted-foreground'}`}>
                 Plan {planName} · {maxEmployees ? `${activeEmployeesCount}/${maxEmployees} usuarios activos` : `${activeEmployeesCount} usuarios activos`}
               </p>
             )}
           </div>
-          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-            <DialogTrigger asChild>
-              <Button
-                className="bg-gradient-primary hover:opacity-90 gap-2"
-                disabled={isAtEmployeeLimit}
-                title={isAtEmployeeLimit ? 'Has alcanzado el límite de usuarios de tu plan' : undefined}
-              >
-                <UserPlus className="h-4 w-4" />
-                Nuevo Empleado
-              </Button>
-            </DialogTrigger>
+          {/* Solo administradores globales pueden crear empleados */}
+          {isGlobalAdmin && (
+            <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+              <DialogTrigger asChild>
+                <Button
+                  className="bg-gradient-primary hover:opacity-90 gap-2"
+                  disabled={isAtEmployeeLimit}
+                  title={isAtEmployeeLimit ? 'Has alcanzado el límite de usuarios de tu plan' : undefined}
+                >
+                  <UserPlus className="h-4 w-4" />
+                  Nuevo Empleado
+                </Button>
+              </DialogTrigger>
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
                 <DialogTitle>Crear Nuevo Empleado</DialogTitle>
@@ -308,11 +519,14 @@ export default function EmployeesPage() {
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4">
-                {!canAssignRoles || !canAssignDepartment || !canAssignRegion ? (
+                {(!canAssignRoles || !canAssignDepartment || !canAssignRegion) && (
                   <p className="text-xs text-muted-foreground">
-                    Los empleados creados en el plan {planName} recibirán acceso estándar. Podrás ampliar estas opciones al mejorar de plan.
+                    {!canAssignRoles && "• No puedes asignar roles personalizados. "}
+                    {!canAssignDepartment && "• Los departamentos solo están disponibles en el plan Enterprise. "}
+                    {!canAssignRegion && "• No puedes asignar regiones. "}
+                    Los empleados recibirán acceso estándar.
                   </p>
-                ) : null}
+                )}
                 <div className="space-y-2">
                   <Label htmlFor="name">Nombre Completo</Label>
                   <Input
@@ -332,18 +546,31 @@ export default function EmployeesPage() {
                     placeholder="correo@empresa.com"
                   />
                 </div>
-                {canAssignRoles && (
+                {(canAssignRoles || company?.plan === 'pro') && (
                   <div className="space-y-2">
                     <Label htmlFor="role">Rol</Label>
-                    <Select value={newEmployee.role} onValueChange={(value: 'ADMIN' | 'EMPLOYEE') => setNewEmployee({ ...newEmployee, role: value })}>
+                    <Select 
+                      value={newEmployee.role} 
+                      onValueChange={(value: 'ADMIN' | 'EMPLOYEE' | 'DEPARTMENT_ADMIN') => setNewEmployee({ ...newEmployee, role: value })}
+                    >
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="EMPLOYEE">Empleado</SelectItem>
-                        <SelectItem value="ADMIN">Administrador</SelectItem>
+                        {company?.plan === 'enterprise' && canAssignDepartment && (
+                          <SelectItem value="DEPARTMENT_ADMIN">Administrador de Departamento</SelectItem>
+                        )}
+                        {company?.plan === 'enterprise' && canAssignRoles && (
+                          <SelectItem value="ADMIN">Administrador Global</SelectItem>
+                        )}
                       </SelectContent>
                     </Select>
+                    {newEmployee.role === 'DEPARTMENT_ADMIN' && (
+                      <p className="text-xs text-muted-foreground">
+                        Puede gestionar y ver gastos de su departamento (solo disponible en Enterprise).
+                      </p>
+                    )}
                   </div>
                 )}
                 {(canAssignDepartment || canAssignRegion) && (
@@ -351,12 +578,34 @@ export default function EmployeesPage() {
                     {canAssignDepartment && (
                       <div className="space-y-2">
                         <Label htmlFor="department">Departamento</Label>
-                        <Input
-                          id="department"
-                          value={newEmployee.department}
-                          onChange={(e) => setNewEmployee({ ...newEmployee, department: e.target.value })}
-                          placeholder="IT, RRHH, etc."
-                        />
+                        {departments.length > 0 ? (
+                          <Select 
+                            value={newEmployee.department} 
+                            onValueChange={(value) => setNewEmployee({ ...newEmployee, department: value })}
+                          >
+                            <SelectTrigger id="department">
+                              <SelectValue placeholder="Selecciona un departamento" />
+                            </SelectTrigger>
+                            <SelectContent className="z-50 bg-popover">
+                              {departments.map((dept) => (
+                                <SelectItem key={dept.id} value={dept.name}>
+                                  {dept.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <p className="text-xs text-muted-foreground py-2">
+                            No hay departamentos configurados. 
+                            <Button 
+                              variant="link" 
+                              className="h-auto p-0 ml-1 text-xs"
+                              onClick={() => window.location.href = '/configuracion'}
+                            >
+                              Crear departamentos
+                            </Button>
+                          </p>
+                        )}
                       </div>
                     )}
                     {canAssignRegion && (
@@ -383,6 +632,7 @@ export default function EmployeesPage() {
               </div>
             </DialogContent>
           </Dialog>
+          )}
         </div>
         {isAtEmployeeLimit && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
@@ -470,7 +720,11 @@ export default function EmployeesPage() {
                           </>
                         )}
                       </Button>
-                      <Button variant="outline" size="sm">
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => handleOpenEditDialog(employee)}
+                      >
                         <Edit className="h-3 w-3 mr-1" />
                         Editar
                       </Button>
@@ -503,6 +757,114 @@ export default function EmployeesPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Edit Employee Dialog */}
+        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Editar Empleado</DialogTitle>
+              <DialogDescription>
+                Modifica los datos de {editingEmployee?.name}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-name">Nombre Completo</Label>
+                <Input
+                  id="edit-name"
+                  value={editForm.name}
+                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                  placeholder="Nombre del empleado"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-password">Nueva Contraseña (opcional)</Label>
+                <Input
+                  id="edit-password"
+                  type="password"
+                  value={editForm.newPassword}
+                  onChange={(e) => setEditForm({ ...editForm, newPassword: e.target.value })}
+                  placeholder="Dejar vacío para mantener la actual"
+                />
+              </div>
+              {editForm.newPassword && (
+                <div className="space-y-2">
+                  <Label htmlFor="edit-confirm-password">Confirmar Nueva Contraseña</Label>
+                  <Input
+                    id="edit-confirm-password"
+                    type="password"
+                    value={editForm.confirmPassword}
+                    onChange={(e) => setEditForm({ ...editForm, confirmPassword: e.target.value })}
+                    placeholder="Confirmar contraseña"
+                  />
+                </div>
+              )}
+              <div className="flex justify-between gap-2 pt-4">
+                <Button 
+                  variant="destructive" 
+                  onClick={handleDeleteEmployee}
+                  className="gap-2"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Eliminar
+                </Button>
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+                    Cancelar
+                  </Button>
+                  <Button onClick={handleUpdateEmployee} className="bg-gradient-primary hover:opacity-90">
+                    Guardar Cambios
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Invitation URL Dialog */}
+        <Dialog open={showInvitationDialog} onOpenChange={setShowInvitationDialog}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Link de Invitación Generado</DialogTitle>
+              <DialogDescription>
+                Copia este enlace y envíalo al nuevo empleado. El enlace no expira hasta que el usuario establezca su contraseña.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="flex items-center space-x-2">
+                <Input
+                  readOnly
+                  value={invitationUrl || ''}
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => {
+                    if (invitationUrl) {
+                      navigator.clipboard.writeText(invitationUrl);
+                      toast.success('Link copiado al portapapeles');
+                    }
+                  }}
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="text-sm text-muted-foreground">
+                <p>El empleado podrá usar este enlace para crear su contraseña y acceder a la plataforma.</p>
+              </div>
+              <Button
+                onClick={() => {
+                  setShowInvitationDialog(false);
+                  setInvitationUrl(null);
+                }}
+                className="w-full"
+              >
+                Cerrar
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </AppLayout>
   );

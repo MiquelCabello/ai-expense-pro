@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { useAuth } from '@/hooks/useAuth'
+import { useAuthV2 } from '@/hooks/useAuthV2'
 import { supabase } from '@/integrations/supabase/client'
 import AppLayout from '@/components/AppLayout'
 import { toLocalISODate, aggregateAnalytics } from '@/lib/analytics'
@@ -22,8 +22,8 @@ interface AnalyticsData {
 }
 
 export default function AnalyticsPage() {
-  const { profile } = useAuth()
-  const accountId = profile?.account_id ?? null
+  const { company, membership, user } = useAuthV2()
+  const accountId = company?.id ?? null
   const [analytics, setAnalytics] = useState<AnalyticsData>({
     totalExpenses: 0,
     expenseCount: 0,
@@ -37,13 +37,13 @@ export default function AnalyticsPage() {
   const [statusFilter, setStatusFilter] = useState<'APPROVED' | 'PENDING' | 'REJECTED' | 'ALL'>('APPROVED')
 
   useEffect(() => {
-    if (!profile || !accountId) return
+    if (!accountId) return
     fetchAnalytics()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile, accountId, timeRange, statusFilter])
+  }, [accountId, timeRange, statusFilter])
 
   const fetchAnalytics = async () => {
-    if (!profile || !accountId) return
+    if (!accountId) return
 
     try {
       setLoading(true)
@@ -75,8 +75,8 @@ export default function AnalyticsPage() {
         .lte('expense_date', toLocalISODate(endDate))
 
       // NOTE: empleados solo ven sus gastos
-      if (profile.role === 'EMPLOYEE') {
-        query = query.eq('employee_id', profile.user_id)
+      if (membership?.role === 'employee') {
+        query = query.eq('employee_id', user?.id)
       }
 
       // NOTE: por defecto solo aprobados; se puede ampliar a ALL
