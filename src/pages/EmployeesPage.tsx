@@ -37,9 +37,16 @@ interface Employee {
   account_id: string;
 }
 
+interface Department {
+  id: string;
+  name: string;
+  account_id: string;
+}
+
 export default function EmployeesPage() {
   const { profile, account } = useAuth();
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [newEmployee, setNewEmployee] = useState({
@@ -124,11 +131,34 @@ export default function EmployeesPage() {
     }
   }, [accountId]);
 
+  const fetchDepartments = useCallback(async () => {
+    if (!accountId || !canAssignDepartment) {
+      setDepartments([]);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('account_departments')
+        .select('*')
+        .eq('account_id', accountId)
+        .order('name');
+
+      if (error) throw error;
+
+      setDepartments(data ?? []);
+    } catch (error) {
+      console.error('[Employees] fetch departments failed', error);
+      toast.error('Error cargando departamentos');
+    }
+  }, [accountId, canAssignDepartment]);
+
   useEffect(() => {
     if (profile?.role === 'ADMIN') {
       fetchEmployees();
+      fetchDepartments();
     }
-  }, [profile, accountId, fetchEmployees]);
+  }, [profile, accountId, fetchEmployees, fetchDepartments]);
 
 
   const handleCreateEmployee = async () => {
@@ -506,12 +536,34 @@ export default function EmployeesPage() {
                     {canAssignDepartment && (
                       <div className="space-y-2">
                         <Label htmlFor="department">Departamento</Label>
-                        <Input
-                          id="department"
-                          value={newEmployee.department}
-                          onChange={(e) => setNewEmployee({ ...newEmployee, department: e.target.value })}
-                          placeholder="IT, RRHH, etc."
-                        />
+                        {departments.length > 0 ? (
+                          <Select 
+                            value={newEmployee.department} 
+                            onValueChange={(value) => setNewEmployee({ ...newEmployee, department: value })}
+                          >
+                            <SelectTrigger id="department">
+                              <SelectValue placeholder="Selecciona un departamento" />
+                            </SelectTrigger>
+                            <SelectContent className="z-50 bg-popover">
+                              {departments.map((dept) => (
+                                <SelectItem key={dept.id} value={dept.name}>
+                                  {dept.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <p className="text-xs text-muted-foreground py-2">
+                            No hay departamentos configurados. 
+                            <Button 
+                              variant="link" 
+                              className="h-auto p-0 ml-1 text-xs"
+                              onClick={() => window.location.href = '/configuracion'}
+                            >
+                              Crear departamentos
+                            </Button>
+                          </p>
+                        )}
                       </div>
                     )}
                     {canAssignRegion && (
