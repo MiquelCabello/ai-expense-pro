@@ -681,15 +681,7 @@ export type Database = {
       }
     }
     Views: {
-      migration_status_v1: {
-        Row: {
-          migrated_count: number | null
-          migration: string | null
-          pending_count: number | null
-          total_original: number | null
-        }
-        Relationships: []
-      }
+      [_ in never]: never
     }
     Functions: {
       check_plan_limits: {
@@ -719,6 +711,15 @@ export type Database = {
       get_admin_count_for_account: {
         Args: { p_account_id: string }
         Returns: number
+      }
+      get_migration_status: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          migrated_count: number
+          migration: string
+          pending_count: number
+          total_original: number
+        }[]
       }
       get_user_department: {
         Args: { _account_id: string; _user_id: string }
