@@ -121,19 +121,33 @@ export default function EmployeesPage() {
       if (company?.owner_user_id) {
         query = query.neq('user_id', company.owner_user_id);
       }
+      
+      // Excluir al usuario actual si es department_admin (no debe verse a sí mismo)
+      if (isDepartmentAdmin && user?.id) {
+        query = query.neq('user_id', user.id);
+      }
 
       // Si es admin de departamento, solo ver empleados de su departamento
       if (isDepartmentAdmin && membership?.department_id) {
+        console.log('[EmployeesPage] Department admin filter - department_id:', membership.department_id);
+        
         // Obtener el nombre del departamento desde account_departments
-        const { data: deptData } = await supabase
+        const { data: deptData, error: deptError } = await supabase
           .from('account_departments')
           .select('name')
           .eq('id', membership.department_id)
           .maybeSingle();
         
+        if (deptError) {
+          console.error('[EmployeesPage] Error fetching department name:', deptError);
+        }
+        
         if (deptData?.name) {
+          console.log('[EmployeesPage] Filtering by department:', deptData.name);
           // Filtrar por el nombre del departamento (campo texto)
           query = query.eq('department', deptData.name);
+        } else {
+          console.warn('[EmployeesPage] No department name found for ID:', membership.department_id);
         }
       }
 
