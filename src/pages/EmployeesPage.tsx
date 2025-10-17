@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/hooks/useAuth';
+import { useAuthV2 } from '@/hooks/useAuthV2';
 import { supabase } from '@/integrations/supabase/client';
 import AppLayout from '@/components/AppLayout';
 import { 
@@ -45,6 +46,7 @@ interface Department {
 
 export default function EmployeesPage() {
   const { profile, account } = useAuth();
+  const { membership, company, isMaster, user } = useAuthV2();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
@@ -79,6 +81,21 @@ export default function EmployeesPage() {
   const activeEmployeesCount = employees.filter(employee => employee.status === 'ACTIVE').length;
   const isAtEmployeeLimit = typeof maxEmployees === 'number' && activeEmployeesCount >= maxEmployees;
 
+  // Determinar si el usuario es administrador (cualquier tipo)
+  const isAdmin = isMaster || 
+    membership?.role === 'owner' || 
+    membership?.role === 'company_admin' || 
+    membership?.role === 'global_admin' || 
+    membership?.role === 'department_admin' ||
+    profile?.role === 'ADMIN';
+  
+  // Determinar el tipo de administrador
+  const isDepartmentAdmin = membership?.role === 'department_admin';
+  const isGlobalAdmin = membership?.role === 'global_admin' || 
+                        membership?.role === 'company_admin' || 
+                        membership?.role === 'owner' ||
+                        isMaster;
+
   useEffect(() => {
     setNewEmployee(prev => ({
       ...prev,
@@ -101,9 +118,14 @@ export default function EmployeesPage() {
         query = query.eq('account_id', accountId);
       }
 
-      // Excluir al usuario actual (owner/admin) de la lista
-      if (profile?.user_id) {
-        query = query.neq('user_id', profile.user_id);
+      // Excluir al owner de la lista
+      if (company?.owner_user_id) {
+        query = query.neq('user_id', company.owner_user_id);
+      }
+
+      // Si es admin de departamento, solo ver empleados de su departamento
+      if (isDepartmentAdmin && membership?.department_id) {
+        query = query.eq('department_id', membership.department_id);
       }
 
       const { data, error } = await query;
@@ -129,7 +151,7 @@ export default function EmployeesPage() {
     } finally {
       setLoading(false);
     }
-  }, [accountId]);
+  }, [accountId, isDepartmentAdmin, membership?.department_id, company?.owner_user_id]);
 
   const fetchDepartments = useCallback(async () => {
     if (!accountId || !canAssignDepartment) {
@@ -154,11 +176,11 @@ export default function EmployeesPage() {
   }, [accountId, canAssignDepartment]);
 
   useEffect(() => {
-    if (profile?.role === 'ADMIN') {
+    if (isAdmin) {
       fetchEmployees();
       fetchDepartments();
     }
-  }, [profile, accountId, fetchEmployees, fetchDepartments]);
+  }, [isAdmin, accountId, fetchEmployees, fetchDepartments]);
 
 
   const handleCreateEmployee = async () => {
@@ -412,8 +434,8 @@ export default function EmployeesPage() {
     employee.region?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // Check if current user is admin
-  if (profile?.role !== 'ADMIN') {
+  // Check if current user is admin (cualquier tipo)
+  if (!isAdmin) {
     return (
       <AppLayout>
         <div className="p-6 flex items-center justify-center min-h-[400px]">
@@ -448,27 +470,33 @@ export default function EmployeesPage() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-3xl font-bold mb-2">Gestión de Empleados</h2>
+            <h2 className="text-3xl font-bold mb-2">
+              {isDepartmentAdmin ? 'Empleados de mi Departamento' : 'Gestión de Empleados'}
+            </h2>
             <p className="text-muted-foreground">
-              Administra usuarios y permisos del sistema
+              {isDepartmentAdmin 
+                ? 'Visualiza los empleados de tu departamento' 
+                : 'Administra usuarios y permisos del sistema'}
             </p>
-            {profile?.role === 'ADMIN' && (
+            {isAdmin && (
               <p className={`text-sm mt-1 ${isAtEmployeeLimit ? 'text-destructive' : 'text-muted-foreground'}`}>
                 Plan {planName} · {maxEmployees ? `${activeEmployeesCount}/${maxEmployees} usuarios activos` : `${activeEmployeesCount} usuarios activos`}
               </p>
             )}
           </div>
-          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-            <DialogTrigger asChild>
-              <Button
-                className="bg-gradient-primary hover:opacity-90 gap-2"
-                disabled={isAtEmployeeLimit}
-                title={isAtEmployeeLimit ? 'Has alcanzado el límite de usuarios de tu plan' : undefined}
-              >
-                <UserPlus className="h-4 w-4" />
-                Nuevo Empleado
-              </Button>
-            </DialogTrigger>
+          {/* Solo administradores globales pueden crear empleados */}
+          {isGlobalAdmin && (
+            <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+              <DialogTrigger asChild>
+                <Button
+                  className="bg-gradient-primary hover:opacity-90 gap-2"
+                  disabled={isAtEmployeeLimit}
+                  title={isAtEmployeeLimit ? 'Has alcanzado el límite de usuarios de tu plan' : undefined}
+                >
+                  <UserPlus className="h-4 w-4" />
+                  Nuevo Empleado
+                </Button>
+              </DialogTrigger>
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
                 <DialogTitle>Crear Nuevo Empleado</DialogTitle>
@@ -590,6 +618,7 @@ export default function EmployeesPage() {
               </div>
             </DialogContent>
           </Dialog>
+          )}
         </div>
         {isAtEmployeeLimit && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
