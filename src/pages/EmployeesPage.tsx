@@ -127,11 +127,21 @@ export default function EmployeesPage() {
         query = query.neq('user_id', user.id);
       }
 
-      // Si es admin de departamento, solo ver empleados de su departamento usando department_id
-      if (isDepartmentAdmin && membership?.department_id) {
-        console.log('[EmployeesPage] Department admin filter - department_id:', membership.department_id);
-        query = query.eq('department_id', membership.department_id);
+    // Si es admin de departamento, solo ver empleados de su departamento
+    // Buscar el departamento del sistema antiguo basándonos en el nombre del departamento del sistema nuevo
+    if (isDepartmentAdmin && membership?.department_id) {
+      // Obtener el nombre del departamento desde el sistema nuevo
+      const { data: newDept } = await supabase
+        .from('departments')
+        .select('name')
+        .eq('id', membership.department_id)
+        .maybeSingle();
+      
+      if (newDept?.name) {
+        console.log('[EmployeesPage] Department admin filter - department name:', newDept.name);
+        query = query.eq('department', newDept.name);
       }
+    }
 
       const { data, error } = await query;
       let resolvedEmployees = data ?? [];
