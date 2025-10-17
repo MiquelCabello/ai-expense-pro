@@ -124,7 +124,17 @@ export default function EmployeesPage() {
 
       // Si es admin de departamento, solo ver empleados de su departamento
       if (isDepartmentAdmin && membership?.department_id) {
-        query = query.eq('department_id', membership.department_id);
+        // Obtener el nombre del departamento desde account_departments
+        const { data: deptData } = await supabase
+          .from('account_departments')
+          .select('name')
+          .eq('id', membership.department_id)
+          .maybeSingle();
+        
+        if (deptData?.name) {
+          // Filtrar por el nombre del departamento (campo texto)
+          query = query.eq('department', deptData.name);
+        }
       }
 
       const { data, error } = await query;
