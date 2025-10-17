@@ -704,9 +704,17 @@ export type Database = {
         }
         Returns: boolean
       }
+      company_plan_dual: {
+        Args: { target_company: string }
+        Returns: Database["public"]["Enums"]["plan_tier"]
+      }
       current_postgres_version: {
         Args: Record<PropertyKey, never>
         Returns: string
+      }
+      effective_category_limit_dual: {
+        Args: { target_company: string }
+        Returns: number
       }
       get_account_id: {
         Args: { _uid: string }
@@ -719,6 +727,10 @@ export type Database = {
       get_admin_count_for_account: {
         Args: { p_account_id: string }
         Returns: number
+      }
+      get_company_from_account: {
+        Args: { account_uuid: string }
+        Returns: string
       }
       get_migration_status: {
         Args: Record<PropertyKey, never>
@@ -733,6 +745,22 @@ export type Database = {
         Args: { _account_id: string; _user_id: string }
         Returns: string
       }
+      get_user_email: {
+        Args: { target_user_id: string }
+        Returns: string
+      }
+      get_user_role_dual: {
+        Args: { target_company: string; target_user_id: string }
+        Returns: Database["public"]["Enums"]["role_type"]
+      }
+      has_company_scope_dual: {
+        Args: { target_company: string }
+        Returns: boolean
+      }
+      has_department_scope_dual: {
+        Args: { target_company: string; target_department: string }
+        Returns: boolean
+      }
       is_account_admin: {
         Args: { _uid: string }
         Returns: boolean
@@ -741,16 +769,32 @@ export type Database = {
         Args: { _uid: string }
         Returns: boolean
       }
+      is_admin_legacy: {
+        Args: Record<PropertyKey, never>
+        Returns: boolean
+      }
       is_any_admin: {
         Args: { _account_id: string; _user_id: string }
+        Returns: boolean
+      }
+      is_employee_dual: {
+        Args: { target_company: string }
         Returns: boolean
       }
       is_leaked_password_protection_enabled: {
         Args: Record<PropertyKey, never>
         Returns: boolean
       }
+      is_master_dual: {
+        Args: Record<PropertyKey, never>
+        Returns: boolean
+      }
       is_master_user: {
         Args: { _email: string } | { _uid: string }
+        Returns: boolean
+      }
+      is_member_of_company_dual: {
+        Args: { target_company: string }
         Returns: boolean
       }
       plan_settings: {
