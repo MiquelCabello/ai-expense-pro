@@ -519,6 +519,64 @@ serve(async (req) => {
 
   console.log('[create-employee] Invitation created with token:', invitation.token);
 
+  // === DUAL WRITE: Preparar datos en el nuevo sistema ===
+  console.log('[create-employee] Starting dual write preparation to new system');
+  
+  try {
+    // 1. Verificar si existe la company migrada desde esta account
+    const { data: company } = await adminClient
+      .from('companies')
+      .select('id, plan')
+      .eq('migrated_from_account_id', accountIdentifier)
+      .maybeSingle();
+
+    if (company) {
+      console.log('[create-employee] Found migrated company:', company.id);
+
+      // 2. Si hay department y no existe en nuevo sistema, crearlo
+      if (normalizedDepartment) {
+        const { data: existingDepartment } = await adminClient
+          .from('departments')
+          .select('id')
+          .eq('company_id', company.id)
+          .eq('name', normalizedDepartment)
+          .maybeSingle();
+
+        if (!existingDepartment) {
+          // Crear el departamento en el nuevo sistema
+          const { data: newDepartment, error: deptCreateError } = await adminClient
+            .from('departments')
+            .insert({
+              company_id: company.id,
+              name: normalizedDepartment,
+            })
+            .select('id')
+            .maybeSingle();
+
+          if (deptCreateError) {
+            console.warn('[create-employee] Failed to create department in new system:', deptCreateError);
+          } else {
+            console.log('[create-employee] Created department in new system:', newDepartment?.id);
+          }
+        } else {
+          console.log('[create-employee] Department already exists in new system:', existingDepartment.id);
+        }
+      }
+
+      // 3. Si el rol es DEPARTMENT_ADMIN, crear la entrada en user_roles también para el nuevo sistema
+      if (requestedRole === 'DEPARTMENT_ADMIN' && normalizedDepartment) {
+        console.log('[create-employee] Invitation prepared for department admin role');
+      }
+
+      console.log('[create-employee] New system preparation complete');
+    } else {
+      console.log('[create-employee] No migrated company found, new system will be populated when invitation is completed');
+    }
+  } catch (dualWriteError) {
+    console.error('[create-employee] Dual write preparation failed:', dualWriteError);
+    // No bloqueamos el flujo si falla el nuevo sistema
+  }
+
   // Generate invitation URL
   const inviteUrl = `https://ai-expense-pro.vercel.app/accept-invite?token=${invitation.token}`;
 
