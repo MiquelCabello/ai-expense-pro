@@ -3,8 +3,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { AuthProvider, useAuth } from "@/hooks/useAuth";
-import { AuthV2Provider } from "@/hooks/useAuthV2";
+import { AuthV2Provider, useAuthV2 } from "@/hooks/useAuthV2";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import LandingPage from "./pages/LandingPage";
 import AuthPage from "./pages/AuthPage";
@@ -23,7 +22,7 @@ const queryClient = new QueryClient();
 
 // Protected Route Wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading } = useAuthV2();
 
   if (loading) {
     return (
@@ -45,7 +44,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 // Public Route Wrapper (redirects if authenticated)
 function PublicRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading } = useAuthV2();
 
   if (loading) {
     return (
@@ -69,10 +68,9 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider defaultTheme="light">
       <TooltipProvider>
-        <AuthProvider>
-          <AuthV2Provider>
-            <Toaster />
-            <Sonner />
+        <AuthV2Provider>
+          <Toaster />
+          <Sonner />
             <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
               <Routes>
                 <Route path="/" element={
@@ -124,10 +122,9 @@ const App = () => (
                 } />
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                 <Route path="*" element={<NotFound />} />
-              </Routes>
-            </BrowserRouter>
-          </AuthV2Provider>
-        </AuthProvider>
+            </Routes>
+          </BrowserRouter>
+        </AuthV2Provider>
       </TooltipProvider>
     </ThemeProvider>
   </QueryClientProvider>

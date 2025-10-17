@@ -65,30 +65,48 @@ export function AuthV2Provider({ children }: { children: ReactNode }) {
     try {
       console.log('[AuthV2] Loading user data for:', currentUser.id);
 
-      const { data: profile } = await supabase
+      const { data: profile, error: profileError } = await supabase
         .from('profiles_v2')
         .select('*')
         .eq('user_id', currentUser.id)
         .maybeSingle();
 
+      if (profileError) {
+        console.error('[AuthV2] Error loading profile_v2:', profileError);
+      }
+
+      console.log('[AuthV2] Profile loaded:', profile);
       setProfileV2(profile);
 
-      const { data: memberships } = await supabase
+      const { data: memberships, error: membershipError } = await supabase
         .from('memberships')
         .select('*')
         .eq('user_id', currentUser.id);
 
+      if (membershipError) {
+        console.error('[AuthV2] Error loading memberships:', membershipError);
+      }
+
+      console.log('[AuthV2] Memberships loaded:', memberships);
       const userMembership = memberships?.[0] || null;
       setMembership(userMembership);
 
       if (userMembership?.company_id) {
-        const { data: companyData } = await supabase
+        const { data: companyData, error: companyError } = await supabase
           .from('companies')
           .select('*')
           .eq('id', userMembership.company_id)
           .single();
 
+        if (companyError) {
+          console.error('[AuthV2] Error loading company:', companyError);
+        }
+
+        console.log('[AuthV2] Company loaded:', companyData);
         setCompany(companyData);
+      } else {
+        console.log('[AuthV2] No membership found, setting company to null');
+        setCompany(null);
       }
 
       const email = currentUser.email?.toLowerCase();
