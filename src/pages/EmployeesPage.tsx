@@ -68,13 +68,13 @@ export default function EmployeesPage() {
   const [invitationUrl, setInvitationUrl] = useState<string | null>(null);
   const [showInvitationDialog, setShowInvitationDialog] = useState(false);
 
-  const accountId = profile?.account_id ?? null;
-  const maxEmployees = account?.max_employees ?? null;
-  const canAssignRoles = account?.can_assign_roles ?? false;
-  const canAssignDepartment = account?.plan === 'ENTERPRISE'; // Solo ENTERPRISE puede asignar departamentos
-  const canAssignRegion = account?.can_assign_region ?? false;
-  const planLabel = account?.plan ?? 'FREE';
-  const planNameMap: Record<string, string> = { FREE: 'Starter', PROFESSIONAL: 'Professional', ENTERPRISE: 'Enterprise' };
+  const accountId = company?.id ?? null;
+  const maxEmployees = company?.max_employees ?? null;
+  const canAssignRoles = true; // Always allow assigning roles in new system
+  const canAssignDepartment = company?.plan === 'enterprise'; // Solo enterprise puede asignar departamentos
+  const canAssignRegion = false; // Deprecated in new system
+  const planLabel = company?.plan ?? 'free';
+  const planNameMap: Record<string, string> = { free: 'Starter', pro: 'Professional', enterprise: 'Enterprise' };
   const planName = planNameMap[planLabel] ?? planLabel;
   const activeEmployeesCount = employees.filter(employee => employee.status === 'ACTIVE').length;
   const isAtEmployeeLimit = typeof maxEmployees === 'number' && activeEmployeesCount >= maxEmployees;
@@ -197,7 +197,7 @@ export default function EmployeesPage() {
 
 
   const handleCreateEmployee = async () => {
-    if (!accountId || profile?.role !== 'ADMIN') {
+    if (!accountId || !isGlobalAdmin) {
       toast.error('No tienes permisos para crear empleados');
       return;
     }
@@ -492,7 +492,7 @@ export default function EmployeesPage() {
                 : 'Administra usuarios y permisos del sistema'}
             </p>
             {/* Solo mostrar información de planes a global admins */}
-            {isGlobalAdmin && (
+            {isGlobalAdmin && maxEmployees && (
               <p className={`text-sm mt-1 ${isAtEmployeeLimit ? 'text-destructive' : 'text-muted-foreground'}`}>
                 Plan {planName} · {maxEmployees ? `${activeEmployeesCount}/${maxEmployees} usuarios activos` : `${activeEmployeesCount} usuarios activos`}
               </p>
@@ -546,7 +546,7 @@ export default function EmployeesPage() {
                     placeholder="correo@empresa.com"
                   />
                 </div>
-                {(canAssignRoles || account?.plan === 'PROFESSIONAL') && (
+                {(canAssignRoles || company?.plan === 'pro') && (
                   <div className="space-y-2">
                     <Label htmlFor="role">Rol</Label>
                     <Select 
@@ -558,10 +558,10 @@ export default function EmployeesPage() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="EMPLOYEE">Empleado</SelectItem>
-                        {account?.plan === 'ENTERPRISE' && canAssignDepartment && (
+                        {company?.plan === 'enterprise' && canAssignDepartment && (
                           <SelectItem value="DEPARTMENT_ADMIN">Administrador de Departamento</SelectItem>
                         )}
-                        {account?.plan === 'ENTERPRISE' && canAssignRoles && (
+                        {company?.plan === 'enterprise' && canAssignRoles && (
                           <SelectItem value="ADMIN">Administrador Global</SelectItem>
                         )}
                       </SelectContent>

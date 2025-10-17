@@ -44,7 +44,7 @@ const isValidThemePreference = (value: unknown): value is 'light' | 'dark' | 'sy
   value === 'light' || value === 'dark' || value === 'system';
 
 export default function ConfigurationPage() {
-  const { company, isMaster, user } = useAuthV2();
+  const { company, isMaster, user, membership } = useAuthV2();
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
   const [categories, setCategories] = useState<Category[]>([]);
@@ -104,31 +104,31 @@ export default function ConfigurationPage() {
     PROFESSIONAL: 'Professional',
     ENTERPRISE: 'Enterprise',
   };
-  const planConfig: Record<'FREE' | 'PROFESSIONAL' | 'ENTERPRISE', { maxEmployees: number | null; monthlyLimit: number | null; categoryLimit: number | null; projectLimit: number | null }> = {
-    FREE: { maxEmployees: 2, monthlyLimit: 50, categoryLimit: 0, projectLimit: 0 },
-    PROFESSIONAL: { maxEmployees: 25, monthlyLimit: null, categoryLimit: 5, projectLimit: 10 },
-    ENTERPRISE: { maxEmployees: null, monthlyLimit: null, categoryLimit: null, projectLimit: null },
+  const planConfig: Record<'free' | 'pro' | 'enterprise', { maxEmployees: number | null; monthlyLimit: number | null; categoryLimit: number | null; projectLimit: number | null }> = {
+    free: { maxEmployees: 2, monthlyLimit: 50, categoryLimit: 0, projectLimit: 0 },
+    pro: { maxEmployees: 25, monthlyLimit: null, categoryLimit: 5, projectLimit: 10 },
+    enterprise: { maxEmployees: null, monthlyLimit: null, categoryLimit: null, projectLimit: null },
   };
-  const planKey = (account?.plan ?? 'FREE') as 'FREE' | 'PROFESSIONAL' | 'ENTERPRISE';
-  const planName = isMaster ? 'Master' : planNameMap[planKey];
-  const resolvedAccountId = isMaster ? null : (profile?.account_id ?? account?.id ?? null);
-  const canAddCustomCategories = planKey !== 'FREE';
-  const canManageProjects = planKey !== 'FREE';
-  const canManageDepartments = planKey === 'ENTERPRISE' || isMaster;
-  const maxEmployees = isMaster ? null : account?.max_employees ?? planConfig[planKey].maxEmployees;
-  const monthlyLimit = isMaster ? null : account?.monthly_expense_limit ?? planConfig[planKey].monthlyLimit;
+  const planKey = (company?.plan ?? 'free') as 'free' | 'pro' | 'enterprise';
+  const planName = isMaster ? 'Master' : (planKey === 'free' ? 'Starter' : planKey === 'pro' ? 'Professional' : 'Enterprise');
+  const resolvedAccountId = isMaster ? null : (company?.id ?? null);
+  const canAddCustomCategories = planKey !== 'free';
+  const canManageProjects = planKey !== 'free';
+  const canManageDepartments = planKey === 'enterprise' || isMaster;
+  const maxEmployees = isMaster ? null : company?.max_employees ?? planConfig[planKey].maxEmployees;
+  const monthlyLimit = isMaster ? null : company?.monthly_expense_limit ?? planConfig[planKey].monthlyLimit;
   const categoryLimit = planConfig[planKey].categoryLimit;
   const projectLimit = planConfig[planKey].projectLimit;
-  const isCategoriesEnabled = planKey !== 'FREE';
+  const isCategoriesEnabled = planKey !== 'free';
   const categoriesLimitReached = typeof categoryLimit === 'number' && categories.length >= categoryLimit;
   const projectLimitReached = typeof projectLimit === 'number' && projectCodes.length >= projectLimit;
-  const isAdminUser = isMaster || profile?.role === 'ADMIN';
+  const isAdminUser = isMaster || membership?.role === 'owner' || membership?.role === 'company_admin' || membership?.role === 'global_admin';
 
   useEffect(() => {
-    if (profile && !isAdminUser) {
+    if (!loading && !isAdminUser && !isMaster) {
       navigate('/dashboard', { replace: true });
     }
-  }, [profile, isAdminUser, navigate]);
+  }, [loading, isAdminUser, isMaster, navigate]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -181,19 +181,18 @@ export default function ConfigurationPage() {
   const loadData = useCallback(async () => {
     try {
       if (!isMaster) {
-        if (profile && profile.role !== 'ADMIN') {
+        const isAdmin = membership?.role === 'owner' || 
+                        membership?.role === 'company_admin' || 
+                        membership?.role === 'global_admin';
+        if (!isAdmin) {
           setCategories([]);
           setProjectCodes([]);
           setDepartments([]);
           setLoading(false);
           return;
         }
-        if (!profile) {
-          setLoading(false);
-          return;
-        }
         if (!resolvedAccountId) {
-          console.warn('[Configuration] Missing account_id for non-master user', profile?.id);
+          console.warn('[Configuration] Missing company_id for non-master user');
           setCategories([]);
           setProjectCodes([]);
           setDepartments([]);
@@ -202,20 +201,20 @@ export default function ConfigurationPage() {
         }
       }
 
-      // Cargar información de la empresa SIEMPRE, no solo cuando companyV2 existe
-      if (companyV2?.id) {
-        console.log('[Configuration] Loading company info:', companyV2);
+      // Cargar información de la empresa SIEMPRE
+      if (company?.id) {
+        console.log('[Configuration] Loading company info:', company);
         setCompanyInfo({
-          name: companyV2.name || '',
-          tax_id: companyV2.tax_id || '',
-          address: companyV2.address || '',
-          city: companyV2.city || '',
-          postal_code: companyV2.postal_code || '',
-          phone: companyV2.phone || '',
-          email: companyV2.email || '',
-          website: companyV2.website || '',
-          description: companyV2.description || '',
-          logo_url: companyV2.logo_url || '',
+          name: company.name || '',
+          tax_id: company.tax_id || '',
+          address: company.address || '',
+          city: company.city || '',
+          postal_code: company.postal_code || '',
+          phone: company.phone || '',
+          email: company.email || '',
+          website: company.website || '',
+          description: company.description || '',
+          logo_url: company.logo_url || '',
         });
       } else {
         console.warn('[Configuration] No company data available');
@@ -272,7 +271,7 @@ export default function ConfigurationPage() {
     } finally {
       setLoading(false);
     }
-  }, [resolvedAccountId, isMaster, profile, companyV2]);
+  }, [resolvedAccountId, isMaster, membership, company]);
 
   const savePreferences = async () => {
     try {
@@ -298,28 +297,28 @@ export default function ConfigurationPage() {
     loadData();
   }, [loadData]);
 
-  // Actualizar companyInfo cuando companyV2 cambie
+  // Actualizar companyInfo cuando company cambie
   useEffect(() => {
-    if (companyV2) {
+    if (company) {
       setCompanyInfo({
-        name: companyV2.name || '',
-        tax_id: companyV2.tax_id || '',
-        address: companyV2.address || '',
-        city: companyV2.city || '',
-        postal_code: companyV2.postal_code || '',
-        phone: companyV2.phone || '',
-        email: companyV2.email || '',
-        website: companyV2.website || '',
-        description: companyV2.description || '',
-        logo_url: companyV2.logo_url || '',
+        name: company.name || '',
+        tax_id: company.tax_id || '',
+        address: company.address || '',
+        city: company.city || '',
+        postal_code: company.postal_code || '',
+        phone: company.phone || '',
+        email: company.email || '',
+        website: company.website || '',
+        description: company.description || '',
+        logo_url: company.logo_url || '',
       });
     }
-  }, [companyV2]);
+  }, [company]);
 
   const saveCompanyProfile = async (event: React.FormEvent) => {
     event.preventDefault();
 
-    if (!companyV2?.id) {
+    if (!company?.id) {
       toast.error('No se ha podido cargar la cuenta activa');
       return;
     }
@@ -339,7 +338,7 @@ export default function ConfigurationPage() {
           website: companyInfo.website,
           description: companyInfo.description,
         })
-        .eq('id', companyV2.id);
+        .eq('id', company.id);
 
       if (error) throw error;
 
@@ -357,7 +356,7 @@ export default function ConfigurationPage() {
 
   const handleLogoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file || !companyV2?.id) return;
+    if (!file || !company?.id) return;
 
     // Validar tipo de archivo
     if (!file.type.startsWith('image/')) {
@@ -376,7 +375,7 @@ export default function ConfigurationPage() {
 
       // Subir a storage
       const fileExt = file.name.split('.').pop();
-      const fileName = `${companyV2.id}-${Date.now()}.${fileExt}`;
+      const fileName = `${company.id}-${Date.now()}.${fileExt}`;
       const filePath = `logos/${fileName}`;
 
       const { error: uploadError } = await supabase.storage
@@ -397,7 +396,7 @@ export default function ConfigurationPage() {
       const { error: updateError } = await supabase
         .from('companies')
         .update({ logo_url: publicUrl })
-        .eq('id', companyV2.id);
+        .eq('id', company.id);
 
       if (updateError) throw updateError;
 
@@ -774,7 +773,7 @@ export default function ConfigurationPage() {
     toast.info('La actualización de plan estará disponible en la integración de pagos.');
   };
 
-  if (profile && !isAdminUser) {
+  if (loading || (!isAdminUser && !isMaster)) {
     return null;
   }
 
@@ -827,7 +826,7 @@ export default function ConfigurationPage() {
           </CardContent>
         </Card>
 
-        {!isMaster && companyV2 && (
+        {!isMaster && company && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center space-x-2">

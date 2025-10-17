@@ -275,8 +275,9 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
   const [creatingCategory, setCreatingCategory] = useState(false)
 
   const displayName =
-    selfEmployee?.full_name ?? (profile as any)?.full_name ?? (profile as any)?.name ??
-    (user?.user_metadata?.full_name as string | undefined) ?? (user?.user_metadata?.name as string | undefined) ??
+    selfEmployee?.full_name ?? 
+    (user?.user_metadata?.full_name as string | undefined) ?? 
+    (user?.user_metadata?.name as string | undefined) ??
     user?.email ?? ''
 
   const normalizeText = useCallback((s?: string) => {
@@ -630,10 +631,7 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
   const handleCreateCategory = async () => {
     const name = categoryProposedName.trim()
     if (!name) { toast.error('El nombre de la categoría no puede estar vacío'); return }
-    if (!account?.can_add_custom_categories) {
-      toast.error('Tu plan actual no permite crear nuevas categorías automáticamente')
-      return
-    }
+    // Remove plan check - just try to create the category
     if (!accountId) {
       toast.error('No se pudo asociar la categoría con tu cuenta')
       return

@@ -22,7 +22,7 @@ interface AnalyticsData {
 }
 
 export default function AnalyticsPage() {
-  const { company } = useAuthV2()
+  const { company, membership, user } = useAuthV2()
   const accountId = company?.id ?? null
   const [analytics, setAnalytics] = useState<AnalyticsData>({
     totalExpenses: 0,
@@ -37,13 +37,13 @@ export default function AnalyticsPage() {
   const [statusFilter, setStatusFilter] = useState<'APPROVED' | 'PENDING' | 'REJECTED' | 'ALL'>('APPROVED')
 
   useEffect(() => {
-    if (!profile || !accountId) return
+    if (!accountId) return
     fetchAnalytics()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile, accountId, timeRange, statusFilter])
+  }, [accountId, timeRange, statusFilter])
 
   const fetchAnalytics = async () => {
-    if (!profile || !accountId) return
+    if (!accountId) return
 
     try {
       setLoading(true)
@@ -75,8 +75,8 @@ export default function AnalyticsPage() {
         .lte('expense_date', toLocalISODate(endDate))
 
       // NOTE: empleados solo ven sus gastos
-      if (profile.role === 'EMPLOYEE') {
-        query = query.eq('employee_id', profile.user_id)
+      if (membership?.role === 'employee') {
+        query = query.eq('employee_id', user?.id)
       }
 
       // NOTE: por defecto solo aprobados; se puede ampliar a ALL
