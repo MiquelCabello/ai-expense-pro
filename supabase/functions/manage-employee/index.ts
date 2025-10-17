@@ -92,6 +92,21 @@ serve(async (req) => {
           .eq('user_id', employeeUserId);
 
         if (updateError) throw updateError;
+
+        // === DUAL WRITE: Update in new system ===
+        try {
+          const { data: company } = await supabaseAdmin
+            .from('companies')
+            .select('id')
+            .eq('migrated_from_account_id', employeeProfile.account_id)
+            .maybeSingle();
+
+          if (company) {
+            console.log('[manage-employee] Name updated in old system, new system has no equivalent name field in memberships');
+          }
+        } catch (error) {
+          console.warn('[manage-employee] Dual write check failed for name update:', error);
+        }
       }
 
       // Update password if provided
@@ -109,6 +124,44 @@ serve(async (req) => {
         { status: 200, headers: jsonHeaders }
       );
     } else if (action === 'delete') {
+      // === DUAL WRITE: Delete from new system first ===
+      try {
+        const { data: company } = await supabaseAdmin
+          .from('companies')
+          .select('id')
+          .eq('migrated_from_account_id', employeeProfile.account_id)
+          .maybeSingle();
+
+        if (company) {
+          // Delete membership
+          const { error: membershipDeleteError } = await supabaseAdmin
+            .from('memberships')
+            .delete()
+            .eq('user_id', employeeUserId)
+            .eq('company_id', company.id);
+
+          if (membershipDeleteError) {
+            console.warn('[manage-employee] Failed to delete membership:', membershipDeleteError);
+          } else {
+            console.log('[manage-employee] Deleted membership for user:', employeeUserId);
+          }
+
+          // Delete profiles_v2
+          const { error: profileV2DeleteError } = await supabaseAdmin
+            .from('profiles_v2')
+            .delete()
+            .eq('user_id', employeeUserId);
+
+          if (profileV2DeleteError) {
+            console.warn('[manage-employee] Failed to delete profiles_v2:', profileV2DeleteError);
+          } else {
+            console.log('[manage-employee] Deleted profiles_v2 for user:', employeeUserId);
+          }
+        }
+      } catch (error) {
+        console.warn('[manage-employee] Dual write failed for delete:', error);
+      }
+
       // Delete user (cascade will delete profile)
       const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(
         employeeUserId

@@ -189,6 +189,75 @@ serve(async (req) => {
     console.log('[complete-invitation] User created successfully:', userId);
   }
 
+  // === DUAL WRITE: Sistema nuevo (companies/memberships/profiles_v2) ===
+  console.log('[complete-invitation] Starting dual write to new system');
+  
+  try {
+    // 1. Verificar si existe la company migrada desde esta account
+    const { data: company } = await adminClient
+      .from('companies')
+      .select('id')
+      .eq('migrated_from_account_id', invitation.account_id)
+      .maybeSingle();
+
+    if (company) {
+      console.log('[complete-invitation] Found migrated company:', company.id);
+
+      // 2. Crear profile en profiles_v2
+      const { error: profileV2Error } = await adminClient
+        .from('profiles_v2')
+        .insert({
+          user_id: userId,
+          email: invitation.email,
+        });
+
+      if (profileV2Error) {
+        console.warn('[complete-invitation] Failed to create profiles_v2:', profileV2Error.message);
+      } else {
+        console.log('[complete-invitation] Created profiles_v2 for user:', userId);
+      }
+
+      // 3. Determinar department_id si aplica
+      let departmentId: string | null = null;
+      if (invitation.department) {
+        const { data: department } = await adminClient
+          .from('departments')
+          .select('id')
+          .eq('company_id', company.id)
+          .eq('name', invitation.department)
+          .maybeSingle();
+        
+        if (department) {
+          departmentId = department.id;
+          console.log('[complete-invitation] Found department:', departmentId);
+        }
+      }
+
+      // 4. Crear membership
+      const membershipRole = invitation.role === 'ADMIN' ? 'company_admin' : 'employee';
+      const { error: membershipError } = await adminClient
+        .from('memberships')
+        .insert({
+          user_id: userId,
+          company_id: company.id,
+          role: membershipRole,
+          department_id: departmentId,
+          migrated_from_profile_id: null, // Nuevo usuario, no migrado
+        });
+
+      if (membershipError) {
+        console.warn('[complete-invitation] Failed to create membership:', membershipError.message);
+      } else {
+        console.log('[complete-invitation] Created membership for user:', userId);
+      }
+    } else {
+      console.log('[complete-invitation] No migrated company found, skipping new system write');
+    }
+  } catch (dualWriteError) {
+    console.error('[complete-invitation] Dual write failed:', dualWriteError);
+    // No bloqueamos el flujo si falla el nuevo sistema
+  }
+
   // Mark invitation as used
   const { error: updateError } = await adminClient
     .from('invitations')
