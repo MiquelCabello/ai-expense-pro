@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
+import { AuthV2Provider } from "@/hooks/useAuthV2";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import LandingPage from "./pages/LandingPage";
 import AuthPage from "./pages/AuthPage";
@@ -70,66 +71,68 @@ const App = () => (
     <ThemeProvider defaultTheme="light">
       <TooltipProvider>
         <AuthProvider>
-          <Toaster />
-          <Sonner />
-          <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-            <Routes>
-              <Route path="/" element={
-                <PublicRoute>
-                  <LandingPage />
-                </PublicRoute>
-              } />
-              <Route path="/auth" element={
-                <PublicRoute>
-                  <AuthPage />
-                </PublicRoute>
-              } />
-              <Route path="/registro-confirmacion" element={<RegistrationConfirmationPage />} />
-              <Route path="/accept-invite" element={<AcceptInvitePage />} />
-              <Route path="/empresa" element={
-                <ProtectedRoute>
-                  <CompanyProfilePage />
-                </ProtectedRoute>
-              } />
-              <Route path="/dashboard" element={
-                <ProtectedRoute>
-                  <Dashboard />
-                </ProtectedRoute>
-              } />
-              <Route path="/gastos" element={
-                <ProtectedRoute>
-                  <ExpensesPage />
-                </ProtectedRoute>
-              } />
-              <Route path="/analisis" element={
-                <ProtectedRoute>
-                  <AnalyticsPage />
-                </ProtectedRoute>
-              } />
-              <Route path="/empleados" element={
-                <ProtectedRoute>
-                  <EmployeesPage />
-                </ProtectedRoute>
-              } />
-              <Route path="/configuracion" element={
-                <ProtectedRoute>
-                  <ConfigurationPage />
-                </ProtectedRoute>
-              } />
-              <Route path="/upload" element={
-                <ProtectedRoute>
-                  <UploadPage />
-                </ProtectedRoute>
-              } />
-              <Route path="/migration-test" element={
-                <ProtectedRoute>
-                  <MigrationTestPage />
-                </ProtectedRoute>
-              } />
-              {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </BrowserRouter>
+          <AuthV2Provider>
+            <Toaster />
+            <Sonner />
+            <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+              <Routes>
+                <Route path="/" element={
+                  <PublicRoute>
+                    <LandingPage />
+                  </PublicRoute>
+                } />
+                <Route path="/auth" element={
+                  <PublicRoute>
+                    <AuthPage />
+                  </PublicRoute>
+                } />
+                <Route path="/registro-confirmacion" element={<RegistrationConfirmationPage />} />
+                <Route path="/accept-invite" element={<AcceptInvitePage />} />
+                <Route path="/empresa" element={
+                  <ProtectedRoute>
+                    <CompanyProfilePage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/dashboard" element={
+                  <ProtectedRoute>
+                    <Dashboard />
+                  </ProtectedRoute>
+                } />
+                <Route path="/gastos" element={
+                  <ProtectedRoute>
+                    <ExpensesPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/analisis" element={
+                  <ProtectedRoute>
+                    <AnalyticsPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/empleados" element={
+                  <ProtectedRoute>
+                    <EmployeesPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/configuracion" element={
+                  <ProtectedRoute>
+                    <ConfigurationPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/upload" element={
+                  <ProtectedRoute>
+                    <UploadPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/migration-test" element={
+                  <ProtectedRoute>
+                    <MigrationTestPage />
+                  </ProtectedRoute>
+                } />
+                {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </BrowserRouter>
+          </AuthV2Provider>
         </AuthProvider>
       </TooltipProvider>
     </ThemeProvider>

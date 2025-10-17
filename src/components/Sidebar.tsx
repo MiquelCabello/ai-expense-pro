@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useAuth } from '@/hooks/useAuth';
+import { useAuthV2 } from '@/hooks/useAuthV2';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -19,24 +19,24 @@ import {
 import { useLocation, useNavigate } from 'react-router-dom';
 
 export default function Sidebar() {
-  const { profile, account, isMaster, signOut } = useAuth();
+  const { user, company, membership, isMaster, signOut } = useAuthV2();
   const location = useLocation();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
 
   const planLabel = useMemo(() => {
     if (isMaster) return 'Master';
-    if (!account?.plan) return 'Sin plan';
-    const map: Record<'FREE' | 'PROFESSIONAL' | 'ENTERPRISE', string> = {
-      FREE: 'Starter',
-      PROFESSIONAL: 'Professional',
-      ENTERPRISE: 'Enterprise',
+    if (!company?.plan) return 'Sin plan';
+    const map: Record<'free' | 'pro' | 'enterprise', string> = {
+      free: 'Starter',
+      pro: 'Professional',
+      enterprise: 'Enterprise',
     };
-    return map[account.plan];
-  }, [account?.plan, isMaster]);
+    return map[company.plan];
+  }, [company?.plan, isMaster]);
 
-  const isAdmin = profile?.role === 'ADMIN' || isMaster;
-  const companyName = account?.name || 'Mi Empresa';
+  const isAdmin = membership?.role !== 'employee' || isMaster;
+  const companyName = company?.name || 'Mi Empresa';
 
   const navigation = [
     {
@@ -158,13 +158,13 @@ export default function Sidebar() {
         <div className="flex items-center space-x-3 mb-3">
           <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
             <span className="text-sm font-medium text-primary-foreground">
-              {profile?.name?.charAt(0)?.toUpperCase() || 'U'}
+              {user?.email?.charAt(0)?.toUpperCase() || 'U'}
             </span>
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">{profile?.name || 'Usuario'}</p>
+            <p className="text-sm font-medium truncate">{user?.email || 'Usuario'}</p>
             <p className="text-xs text-muted-foreground">
-              {profile?.role === 'ADMIN' ? 'Director Financiero' : 'Empleado'}
+              {isAdmin ? 'Director Financiero' : 'Empleado'}
             </p>
           </div>
         </div>
