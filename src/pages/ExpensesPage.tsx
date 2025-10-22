@@ -92,7 +92,7 @@ export default function ExpensesPage() {
         const employeeIds = Array.from(new Set(resolvedExpenses.map(e => e.employee_id).filter(Boolean)));
         if (employeeIds.length > 0) {
           try {
-            let profileQuery = supabase
+            const profileQuery = supabase
               .from('profiles_v2')
               .select('user_id, email')
               .in('user_id', employeeIds);

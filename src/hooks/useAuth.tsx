@@ -248,7 +248,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (error) throw error;
 
-        let enrichedProfile = data;
+        const enrichedProfile = data;
 
         // For legacy compat, we're now using useAuthV2's system.
         // This hook is deprecated and should not be used for new features.
