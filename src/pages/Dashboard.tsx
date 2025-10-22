@@ -112,18 +112,18 @@ export default function Dashboard() {
       if (employeeIds.length > 0) {
         try {
           let profileQuery = supabase
-            .from('profiles')
-            .select('user_id, name')
+            .from('profiles_v2')
+            .select('user_id, email')
             .in('user_id', employeeIds);
 
           if (!isMaster && resolvedAccountId) {
-            profileQuery = profileQuery.eq('account_id', resolvedAccountId);
+            // profiles_v2 doesn't have account_id, skip filtering
           }
 
           const { data: employeeProfiles, error: profilesError } = await profileQuery;
 
           if (!profilesError && employeeProfiles?.length) {
-            profilesMap = Object.fromEntries(employeeProfiles.map((p: any) => [p.user_id, p]));
+            profilesMap = Object.fromEntries(employeeProfiles.map((p: any) => [p.user_id, { user_id: p.user_id, name: p.email }]));
           }
         } catch (profilesErr) {
           console.warn('[Dashboard] Unable to load employee names', profilesErr);

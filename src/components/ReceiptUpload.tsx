@@ -356,18 +356,17 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
     ;(async () => {
       try {
         const { data, error } = await supabase
-          .from('profiles')
-          .select('user_id, name, status')
-          .eq('account_id', accountId)
-          .eq('status', 'ACTIVE')
-          .order('name')
+          .from('profiles_v2')
+          .select('user_id, email')
+          .eq('user_id', accountId)
+          .order('email')
         if (error) throw error
         const normalized = (data || []).map((item) => ({
           id: item.user_id,
-          full_name: item.name,
-          email: '',
+          full_name: item.email, // Use email as name since profiles_v2 doesn't have name
+          email: item.email,
           account_id: accountId,
-          status: item.status,
+          status: 'ACTIVE',
         }))
         setEmployeesList(normalized)
       } catch {

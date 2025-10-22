@@ -28,19 +28,17 @@ import { toast } from 'sonner';
 interface Employee {
   id: string;
   user_id: string;
-  name: string;
-  role: 'ADMIN' | 'EMPLOYEE' | 'DEPARTMENT_ADMIN';
-  department?: string | null;
-  region?: string | null;
-  status: 'ACTIVE' | 'INACTIVE';
+  email: string;
+  role: 'owner' | 'company_admin' | 'department_admin' | 'employee';
+  department_id?: string | null;
   created_at: string;
-  account_id: string;
+  company_id: string;
 }
 
 interface Department {
   id: string;
   name: string;
-  account_id: string;
+  company_id: string;
 }
 
 export default function EmployeesPage() {
@@ -52,10 +50,8 @@ export default function EmployeesPage() {
   const [newEmployee, setNewEmployee] = useState({
     name: '',
     email: '',
-    role: 'EMPLOYEE' as 'ADMIN' | 'EMPLOYEE' | 'DEPARTMENT_ADMIN',
+    role: 'employee' as 'owner' | 'company_admin' | 'department_admin' | 'employee',
     department: '',
-    region: '',
-    status: 'ACTIVE' as 'ACTIVE' | 'INACTIVE'
   });
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -76,43 +72,44 @@ export default function EmployeesPage() {
   const planLabel = company?.plan ?? 'free';
   const planNameMap: Record<string, string> = { free: 'Starter', pro: 'Professional', enterprise: 'Enterprise' };
   const planName = planNameMap[planLabel] ?? planLabel;
-  const activeEmployeesCount = employees.filter(employee => employee.status === 'ACTIVE').length;
+  const activeEmployeesCount = employees.length; // All memberships are active by default
   const isAtEmployeeLimit = typeof maxEmployees === 'number' && activeEmployeesCount >= maxEmployees;
 
   // Determinar si el usuario es administrador (cualquier tipo)
   const isAdmin = isMaster || 
     membership?.role === 'owner' || 
     membership?.role === 'company_admin' || 
-    membership?.role === 'global_admin' || 
     membership?.role === 'department_admin';
   
   // Determinar el tipo de administrador
   const isDepartmentAdmin = membership?.role === 'department_admin';
-  const isGlobalAdmin = membership?.role === 'global_admin' || 
-                        membership?.role === 'company_admin' || 
+  const isGlobalAdmin = membership?.role === 'company_admin' || 
                         membership?.role === 'owner' ||
                         isMaster;
 
   useEffect(() => {
     setNewEmployee(prev => ({
       ...prev,
-      role: canAssignRoles ? prev.role : 'EMPLOYEE',
-      department: canAssignDepartment ? prev.department : '',
-      region: canAssignRegion ? prev.region : ''
+      role: canAssignRoles ? prev.role : 'employee',
+      department: canAssignDepartment ? prev.department : ''
     }));
-  }, [canAssignRoles, canAssignDepartment, canAssignRegion]);
+  }, [canAssignRoles, canAssignDepartment]);
 
   const fetchEmployees = useCallback(async () => {
     try {
       setLoading(true);
 
+      // Usar memberships con join a profiles_v2
       let query = supabase
-        .from('profiles')
-        .select('*')
+        .from('memberships')
+        .select(`
+          *,
+          profiles_v2!inner(email)
+        `)
         .order('created_at', { ascending: false });
 
       if (accountId) {
-        query = query.eq('account_id', accountId);
+        query = query.eq('company_id', accountId);
       }
 
       // Excluir al owner de la lista
@@ -125,37 +122,25 @@ export default function EmployeesPage() {
         query = query.neq('user_id', user.id);
       }
 
-    // Si es admin de departamento, solo ver empleados de su departamento
-    // Buscar el departamento del sistema antiguo basándonos en el nombre del departamento del sistema nuevo
-    if (isDepartmentAdmin && membership?.department_id) {
-      // Obtener el nombre del departamento desde el sistema nuevo
-      const { data: newDept } = await supabase
-        .from('departments')
-        .select('name')
-        .eq('id', membership.department_id)
-        .maybeSingle();
-      
-      if (newDept?.name) {
-        console.log('[EmployeesPage] Department admin filter - department name:', newDept.name);
-        query = query.eq('department', newDept.name);
+      // Si es admin de departamento, solo ver empleados de su departamento
+      if (isDepartmentAdmin && membership?.department_id) {
+        query = query.eq('department_id', membership.department_id);
       }
-    }
 
       const { data, error } = await query;
-      let resolvedEmployees = data ?? [];
 
-      if (error) {
-        if (accountId && typeof error.message === 'string' && error.message.includes('account_id')) {
-          const { data: fallbackData, error: fallbackError } = await supabase
-            .from('profiles')
-            .select('*')
-            .order('created_at', { ascending: false });
-          if (fallbackError) throw fallbackError;
-          resolvedEmployees = fallbackData ?? [];
-        } else {
-          throw error;
-        }
-      }
+      if (error) throw error;
+
+      // Transform memberships to Employee format
+      const resolvedEmployees: Employee[] = (data ?? []).map((m: any) => ({
+        id: m.user_id, // Use user_id as id for compatibility
+        user_id: m.user_id,
+        email: m.profiles_v2?.email ?? 'Sin email',
+        role: m.role,
+        department_id: m.department_id,
+        created_at: m.created_at,
+        company_id: m.company_id,
+      }));
 
       setEmployees(resolvedEmployees);
     } catch (error) {
@@ -164,7 +149,7 @@ export default function EmployeesPage() {
     } finally {
       setLoading(false);
     }
-  }, [accountId, isDepartmentAdmin, membership?.department_id, company?.owner_user_id]);
+  }, [accountId, isDepartmentAdmin, membership?.department_id, company?.owner_user_id, user?.id]);
 
   const fetchDepartments = useCallback(async () => {
     if (!accountId || !canAssignDepartment) {
@@ -174,9 +159,9 @@ export default function EmployeesPage() {
 
     try {
       const { data, error } = await supabase
-        .from('account_departments')
+        .from('departments')
         .select('*')
-        .eq('account_id', accountId)
+        .eq('company_id', accountId)
         .order('name');
 
       if (error) throw error;
@@ -220,9 +205,8 @@ export default function EmployeesPage() {
     }
 
     try {
-      const sanitizedRole = canAssignRoles ? newEmployee.role : 'EMPLOYEE';
+      const sanitizedRole = canAssignRoles ? newEmployee.role : 'employee';
       const sanitizedDepartment = canAssignDepartment ? newEmployee.department.trim() : '';
-      const sanitizedRegion = canAssignRegion ? newEmployee.region.trim() : '';
 
       const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData.session?.access_token;
@@ -241,7 +225,7 @@ export default function EmployeesPage() {
           email,
           role: sanitizedRole,
           department: canAssignDepartment ? sanitizedDepartment || null : null,
-          region: canAssignRegion ? sanitizedRegion || null : null
+          companyId: accountId
         })
       });
 
@@ -267,10 +251,8 @@ export default function EmployeesPage() {
       setNewEmployee({
         name: '',
         email: '',
-        role: 'EMPLOYEE',
-        department: '',
-        region: '',
-        status: 'ACTIVE'
+        role: 'employee',
+        department: ''
       });
       fetchEmployees();
     } catch (error) {
@@ -279,28 +261,13 @@ export default function EmployeesPage() {
     }
   };
 
-  const handleUpdateEmployeeStatus = async (employeeId: string, newStatus: 'ACTIVE' | 'INACTIVE') => {
-    if (!accountId) return;
-    try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ status: newStatus })
-        .eq('id', employeeId)
-        .eq('account_id', accountId);
-      
-      if (error) throw error;
-      
-      toast.success(`Estado del empleado actualizado a ${newStatus === 'ACTIVE' ? 'Activo' : 'Inactivo'}`);
-      fetchEmployees();
-    } catch (error) {
-      toast.error('Error actualizando estado del empleado');
-    }
-  };
+  // Status functionality removed - memberships don't have status field
+  // All memberships are considered active
 
   const handleOpenEditDialog = (employee: Employee) => {
     setEditingEmployee(employee);
     setEditForm({
-      name: employee.name,
+      name: employee.email, // Use email as name
       newPassword: '',
       confirmPassword: ''
     });
@@ -364,7 +331,7 @@ export default function EmployeesPage() {
   const handleDeleteEmployee = async () => {
     if (!editingEmployee || !accountId) return;
 
-    if (!confirm(`¿Estás seguro de que quieres eliminar a ${editingEmployee.name}? Esta acción no se puede deshacer.`)) {
+    if (!confirm(`¿Estás seguro de que quieres eliminar a ${editingEmployee.email}? Esta acción no se puede deshacer.`)) {
       return;
     }
 
@@ -441,11 +408,21 @@ export default function EmployeesPage() {
     );
   };
 
-  const filteredEmployees = employees.filter(employee =>
-    employee.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    employee.department?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    employee.region?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredEmployees = employees.filter(employee => {
+    const searchLower = searchTerm.toLowerCase();
+    const emailMatch = employee.email.toLowerCase().includes(searchLower);
+    
+    // Find department name if department_id exists
+    let departmentName = '';
+    if (employee.department_id) {
+      const dept = departments.find(d => d.id === employee.department_id);
+      departmentName = dept?.name ?? '';
+    }
+    
+    const departmentMatch = departmentName.toLowerCase().includes(searchLower);
+    
+    return emailMatch || departmentMatch;
+  });
 
   // Check if current user is admin (cualquier tipo)
   if (!isAdmin) {
@@ -551,30 +528,31 @@ export default function EmployeesPage() {
                     <Label htmlFor="role">Rol</Label>
                     <Select 
                       value={newEmployee.role} 
-                      onValueChange={(value: 'ADMIN' | 'EMPLOYEE' | 'DEPARTMENT_ADMIN') => setNewEmployee({ ...newEmployee, role: value })}
+                      onValueChange={(value: 'owner' | 'company_admin' | 'department_admin' | 'employee') => setNewEmployee({ ...newEmployee, role: value })}
                     >
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="EMPLOYEE">Empleado</SelectItem>
+                        <SelectItem value="employee">Empleado</SelectItem>
                         {company?.plan === 'enterprise' && canAssignDepartment && (
-                          <SelectItem value="DEPARTMENT_ADMIN">Administrador de Departamento</SelectItem>
+                          <SelectItem value="department_admin">Administrador de Departamento</SelectItem>
                         )}
                         {company?.plan === 'enterprise' && canAssignRoles && (
-                          <SelectItem value="ADMIN">Administrador Global</SelectItem>
+                          <SelectItem value="company_admin">Administrador de Empresa</SelectItem>
                         )}
                       </SelectContent>
                     </Select>
-                    {newEmployee.role === 'DEPARTMENT_ADMIN' && (
+                    {newEmployee.role === 'department_admin' && (
                       <p className="text-xs text-muted-foreground">
                         Puede gestionar y ver gastos de su departamento (solo disponible en Enterprise).
                       </p>
                     )}
                   </div>
                 )}
-                {(canAssignDepartment || canAssignRegion) && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {canAssignDepartment && (
+                  <div className="space-y-2">
+                    <Label htmlFor="department">Departamento</Label>
                     {canAssignDepartment && (
                       <div className="space-y-2">
                         <Label htmlFor="department">Departamento</Label>
@@ -606,17 +584,6 @@ export default function EmployeesPage() {
                             </Button>
                           </p>
                         )}
-                      </div>
-                    )}
-                    {canAssignRegion && (
-                      <div className="space-y-2">
-                        <Label htmlFor="region">Región</Label>
-                        <Input
-                          id="region"
-                          value={newEmployee.region}
-                          onChange={(e) => setNewEmployee({ ...newEmployee, region: e.target.value })}
-                          placeholder="Madrid, Barcelona, etc."
-                        />
                       </div>
                     )}
                   </div>
@@ -676,23 +643,19 @@ export default function EmployeesPage() {
                   >
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-2">
-                        <h4 className="font-semibold">{employee.name}</h4>
+                        <h4 className="font-semibold">{employee.email}</h4>
                         {getRoleBadge(employee.role)}
-                        {getStatusBadge(employee.status)}
                       </div>
                       <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                        {employee.department && (
-                          <div className="flex items-center gap-1">
-                            <Briefcase className="h-3 w-3" />
-                            <span>{employee.department}</span>
-                          </div>
-                        )}
-                        {employee.region && (
-                          <div className="flex items-center gap-1">
-                            <MapPin className="h-3 w-3" />
-                            <span>{employee.region}</span>
-                          </div>
-                        )}
+                        {employee.department_id && (() => {
+                          const dept = departments.find(d => d.id === employee.department_id);
+                          return dept && (
+                            <div className="flex items-center gap-1">
+                              <Briefcase className="h-3 w-3" />
+                              <span>{dept.name}</span>
+                            </div>
+                          );
+                        })()}
                         <div className="flex items-center gap-1">
                           <span>📅</span>
                           <span>Registrado: {new Date(employee.created_at).toLocaleDateString('es-ES')}</span>
@@ -703,29 +666,9 @@ export default function EmployeesPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handleUpdateEmployeeStatus(
-                          employee.id, 
-                          employee.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE'
-                        )}
-                      >
-                        {employee.status === 'ACTIVE' ? (
-                          <>
-                            <UserX className="h-3 w-3 mr-1" />
-                            Desactivar
-                          </>
-                        ) : (
-                          <>
-                            <UserCheck className="h-3 w-3 mr-1" />
-                            Activar
-                          </>
-                        )}
-                      </Button>
-                      <Button 
-                        variant="outline" 
-                        size="sm"
                         onClick={() => handleOpenEditDialog(employee)}
                       >
-                        <Edit className="h-3 w-3 mr-1" />
+                        <Edit className="h-4 w-4 mr-2" />
                         Editar
                       </Button>
                     </div>
@@ -764,7 +707,7 @@ export default function EmployeesPage() {
             <DialogHeader>
               <DialogTitle>Editar Empleado</DialogTitle>
               <DialogDescription>
-                Modifica los datos de {editingEmployee?.name}
+                Modifica los datos de {editingEmployee?.email}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">

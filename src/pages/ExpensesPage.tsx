@@ -93,18 +93,18 @@ export default function ExpensesPage() {
         if (employeeIds.length > 0) {
           try {
             let profileQuery = supabase
-              .from('profiles')
-              .select('user_id, name')
+              .from('profiles_v2')
+              .select('user_id, email')
               .in('user_id', employeeIds);
 
             if (!isMaster && resolvedAccountId) {
-              profileQuery = profileQuery.eq('account_id', resolvedAccountId);
+              // profiles_v2 doesn't have account_id, skip filtering
             }
 
             const { data: profiles, error: profilesError } = await profileQuery;
 
             if (!profilesError && profiles) {
-              const profilesMap = Object.fromEntries(profiles.map(p => [p.user_id, p]));
+              const profilesMap = Object.fromEntries(profiles.map(p => [p.user_id, { user_id: p.user_id, name: p.email }]));
               expensesWithProfiles = resolvedExpenses.map(exp => ({
                 ...exp,
                 profiles: profilesMap[exp.employee_id] || null

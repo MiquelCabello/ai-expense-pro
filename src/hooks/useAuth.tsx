@@ -241,22 +241,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const loadProfile = async (currentUser: User) => {
       try {
         const { data, error } = await supabase
-          .from('profiles')
-          .select(`
-            *,
-            accounts (
-              id,
-              name,
-              plan,
-              owner_user_id,
-              max_employees,
-              can_assign_roles,
-              can_assign_department,
-              can_assign_region,
-              can_add_custom_categories,
-              monthly_expense_limit
-            )
-          `)
+          .from('profiles_v2')
+          .select('*')
           .eq('user_id', currentUser.id)
           .maybeSingle();
 
@@ -264,50 +250,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         let enrichedProfile = data;
 
-        if (enrichedProfile && !(enrichedProfile as any).accounts) {
-          const hasAccountId = Object.prototype.hasOwnProperty.call(enrichedProfile, 'account_id');
-          const candidateAccountId = hasAccountId ? enrichedProfile.account_id : null;
-
-          if (candidateAccountId) {
-            try {
-              const { data: accountRow, error: accountError } = await supabase
-                .from('accounts')
-                .select(`
-                  id,
-                  name,
-                  plan,
-                  owner_user_id,
-                  max_employees,
-                  can_assign_roles,
-                  can_assign_department,
-                  can_assign_region,
-                  can_add_custom_categories,
-                  monthly_expense_limit
-                `)
-                .eq('id', candidateAccountId as string)
-                .maybeSingle();
-
-              if (!accountError && accountRow) {
-                const normalized = applyPlanDefaults({
-                  id: accountRow.id,
-                  name: accountRow.name,
-                  plan: accountRow.plan,
-                  owner_user_id: accountRow.owner_user_id,
-                  max_employees: accountRow.max_employees,
-                  can_assign_roles: accountRow.can_assign_roles,
-                  can_assign_department: accountRow.can_assign_department,
-                  can_assign_region: accountRow.can_assign_region,
-                  can_add_custom_categories: accountRow.can_add_custom_categories,
-                  monthly_expense_limit: accountRow.monthly_expense_limit ?? null,
-                });
-                (enrichedProfile as any).accounts = normalized;
-                enrichedProfile.account_id = enrichedProfile.account_id ?? normalized.id;
-              }
-            } catch (accountFetchError) {
-              console.warn('[Auth] Failed to load related account', accountFetchError);
-            }
-          }
-        }
+        // For legacy compat, we're now using useAuthV2's system.
+        // This hook is deprecated and should not be used for new features.
 
         applyProfile(enrichedProfile, currentUser);
       } catch (error) {

@@ -34,7 +34,7 @@ interface ProjectCode {
 interface Department {
   id: string;
   name: string;
-  account_id: string;
+  company_id: string;
   created_at: string;
 }
 
@@ -240,12 +240,12 @@ export default function ConfigurationPage() {
       }
 
       let departmentsQuery = supabase
-        .from('account_departments')
+        .from('departments')
         .select('*')
         .order('name');
 
       if (!isMaster && resolvedAccountId) {
-        departmentsQuery = departmentsQuery.eq('account_id', resolvedAccountId);
+        departmentsQuery = departmentsQuery.eq('company_id', resolvedAccountId);
       }
 
       const [
@@ -680,13 +680,13 @@ export default function ConfigurationPage() {
 
     try {
       const { error } = await supabase
-        .from('account_departments')
+        .from('departments')
         .update({
           name: newDepartmentName,
           updated_at: new Date().toISOString()
         })
         .eq('id', editingDepartment.id)
-        .eq('account_id', resolvedAccountId);
+        .eq('company_id', resolvedAccountId);
 
       if (error) throw error;
 
@@ -721,10 +721,10 @@ export default function ConfigurationPage() {
 
     try {
       const { error } = await supabase
-        .from('account_departments')
+        .from('departments')
         .insert({
           name: newDepartmentName,
-          account_id: resolvedAccountId
+          company_id: resolvedAccountId
         });
 
       if (error) throw error;
@@ -752,10 +752,10 @@ export default function ConfigurationPage() {
     setIsDeletingDepartment(true);
     try {
       const { error } = await supabase
-        .from('account_departments')
+        .from('departments')
         .delete()
         .eq('id', departmentToDelete.id)
-        .eq('account_id', resolvedAccountId);
+        .eq('company_id', resolvedAccountId);
 
       if (error) throw error;
 

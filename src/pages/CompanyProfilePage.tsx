@@ -70,7 +70,8 @@ export default function CompanyProfilePage() {
         const aggregated = (membershipsData ?? []).reduce((acc, row) => {
           acc.total += 1;
           acc.active += 1;
-          if (row.role === 'owner' || row.role === 'company_admin' || row.role === 'global_admin') acc.admins += 1;
+          if (row.role === 'owner' || row.role === 'company_admin') acc.admins += 1;
+          if (row.role === 'department_admin') acc.admins += 1; // department_admin también es admin
           if (row.role === 'employee') acc.employees += 1;
           return acc;
         }, initial);
