@@ -162,16 +162,19 @@ serve(async (req) => {
     departmentId = dept?.id || null;
   }
 
+  // Generar token único
+  const token = crypto.randomUUID();
+
   // Crear invitación
   const { data: invitation, error: invitationError } = await adminClient
     .from('invitations')
     .insert({
       email,
-      name,
-      role: requestedRole,
-      department: payload.department || null,
-      account_id: targetCompanyId,
-      created_by: adminUser.id,
+      token,
+      role: mappedRole,
+      department_id: departmentId,
+      company_id: targetCompanyId,
+      invited_by: adminUser.id,
       expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
     })
     .select()
