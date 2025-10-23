@@ -226,7 +226,7 @@ export default function ConfigurationPage() {
         .order('name');
 
       if (!isMaster && resolvedAccountId) {
-        categoriesQuery = categoriesQuery.eq('account_id', resolvedAccountId);
+        categoriesQuery = categoriesQuery.eq('company_id', resolvedAccountId);
       }
 
       let projectCodesQuery = supabase
@@ -236,7 +236,7 @@ export default function ConfigurationPage() {
         .order('code');
 
       if (!isMaster && resolvedAccountId) {
-        projectCodesQuery = projectCodesQuery.eq('account_id', resolvedAccountId);
+        projectCodesQuery = projectCodesQuery.eq('company_id', resolvedAccountId);
       }
 
       let departmentsQuery = supabase
@@ -448,7 +448,7 @@ export default function ConfigurationPage() {
           budget_monthly: newCategoryBudget ? parseFloat(newCategoryBudget) : null
         })
         .eq('id', editingCategory.id)
-        .eq('account_id', resolvedAccountId);
+        .eq('company_id', resolvedAccountId);
 
       if (error) throw error;
 
@@ -495,7 +495,7 @@ export default function ConfigurationPage() {
         .insert({
           name: newCategoryName,
           budget_monthly: newCategoryBudget ? parseFloat(newCategoryBudget) : null,
-          account_id: resolvedAccountId
+          company_id: resolvedAccountId
         });
 
       if (error) throw error;
@@ -535,7 +535,7 @@ export default function ConfigurationPage() {
           name: newProjectName
         })
         .eq('id', editingProject.id)
-        .eq('account_id', resolvedAccountId);
+        .eq('company_id', resolvedAccountId);
 
       if (error) throw error;
 
@@ -579,7 +579,7 @@ export default function ConfigurationPage() {
           code: newProjectCode,
           name: newProjectName,
           status: 'ACTIVE',
-          account_id: resolvedAccountId
+          company_id: resolvedAccountId
         });
 
       if (error) throw error;
@@ -611,7 +611,7 @@ export default function ConfigurationPage() {
         .from('categories')
         .delete()
         .eq('id', categoryToDelete.id)
-        .eq('account_id', resolvedAccountId);
+        .eq('company_id', resolvedAccountId);
 
       if (error) throw error;
 
@@ -642,7 +642,7 @@ export default function ConfigurationPage() {
         .from('project_codes')
         .update({ status: 'INACTIVE' })
         .eq('id', projectToDelete.id)
-        .eq('account_id', resolvedAccountId);
+        .eq('company_id', resolvedAccountId);
 
       if (error) throw error;
 

@@ -92,7 +92,7 @@ export default function Dashboard() {
         `);
 
       if (!isMaster && resolvedAccountId) {
-        expenseQuery = expenseQuery.eq('account_id', resolvedAccountId);
+        expenseQuery = expenseQuery.eq('company_id', resolvedAccountId);
       }
 
       if (!isMaster && isEmployee && user) {

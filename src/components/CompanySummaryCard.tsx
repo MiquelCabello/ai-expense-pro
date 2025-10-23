@@ -2,21 +2,20 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Building2, Users, Briefcase, Calendar, MapPin, Mail } from 'lucide-react';
-import type { Account, Profile } from '@/hooks/useAuth';
+import type { Company, ProfileV2 } from '@/hooks/useAuthV2';
 
 interface CompanySummaryCardProps {
-  account: Account | null;
-  profile: Profile | null;
+  company: Company | null;
+  profile: ProfileV2 | null;
   planDisplay: string;
   activeEmployees: number;
   maxEmployees: number | null;
 }
 
-export default function CompanySummaryCard({ account, profile, planDisplay, activeEmployees, maxEmployees }: CompanySummaryCardProps) {
-  const companyName = account?.name || 'Mi Empresa';
-  const location = profile?.region || 'España';
-  const department = profile?.department || 'General';
-  const ownerEmail = profile?.name ? `${profile.name.replace(/\s+/g, '.').toLowerCase()}@${companyName.replace(/\s+/g, '').toLowerCase()}.com` : 'contacto@empresa.com';
+export default function CompanySummaryCard({ company, profile, planDisplay, activeEmployees, maxEmployees }: CompanySummaryCardProps) {
+  const companyName = company?.name || 'Mi Empresa';
+  const location = company?.city || 'España';
+  const ownerEmail = profile?.email || 'contacto@empresa.com';
 
   return (
     <Card className="bg-card border border-border">
@@ -35,8 +34,8 @@ export default function CompanySummaryCard({ account, profile, planDisplay, acti
         <div className="space-y-3">
           <h4 className="font-semibold text-sm text-muted-foreground">Resumen</h4>
           <p className="text-sm text-muted-foreground">
-            Operación principal en <strong>{location}</strong>, con foco en el departamento de <strong>{department}</strong>.
-            Coordinación general a cargo de <strong>{profile?.name ?? 'Equipo financiero'}</strong>.
+            Operación principal en <strong>{location}</strong>.
+            Coordinación general a cargo de <strong>{profile?.email ?? 'Equipo financiero'}</strong>.
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-muted-foreground">
             <span className="flex items-center gap-2">
@@ -58,12 +57,14 @@ export default function CompanySummaryCard({ account, profile, planDisplay, acti
           <div className="grid gap-2 text-sm text-muted-foreground">
             <span className="flex items-center gap-2">
               <Users className="h-4 w-4 text-primary" />
-              {profile?.name || 'Usuario principal'}
+              {profile?.email || 'Usuario principal'}
             </span>
-            <span className="flex items-center gap-2">
-              <MapPin className="h-4 w-4 text-primary" />
-              Calle Gran Vía, 123 · Madrid
-            </span>
+            {company?.address && (
+              <span className="flex items-center gap-2">
+                <MapPin className="h-4 w-4 text-primary" />
+                {company.address} · {company.city}
+              </span>
+            )}
           </div>
           <Separator className="my-2" />
           <p className="text-xs text-muted-foreground">

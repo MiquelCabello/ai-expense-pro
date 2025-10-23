@@ -70,7 +70,7 @@ export default function ExpensesPage() {
         .order('created_at', { ascending: false });
 
       if (!isMaster && resolvedAccountId) {
-        query = query.eq('account_id', resolvedAccountId);
+        query = query.eq('company_id', resolvedAccountId);
       }
 
       // If employee, only show their expenses
