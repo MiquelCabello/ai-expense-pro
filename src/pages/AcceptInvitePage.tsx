@@ -209,7 +209,7 @@ export default function AcceptInvitePage() {
             </div>
             <CardTitle>Activar Cuenta</CardTitle>
             <CardDescription>
-              Hola {invitation.name}, establece tu contraseña para acceder
+              Establece tu contraseña para acceder
             </CardDescription>
           </CardHeader>
           <CardContent>

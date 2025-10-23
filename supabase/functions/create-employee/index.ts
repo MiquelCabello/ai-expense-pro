@@ -40,16 +40,16 @@ serve(async (req) => {
   const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
   const authHeader = req.headers.get("Authorization") || "";
-  const token = authHeader.replace("Bearer", "").trim();
+  const authToken = authHeader.replace("Bearer", "").trim();
 
-  if (!token) {
+  if (!authToken) {
     return new Response(JSON.stringify({ error: "missing_token" }), {
       status: 401,
       headers: jsonHeaders,
     });
   }
 
-  const { data: { user: adminUser }, error: authError } = await adminClient.auth.getUser(token);
+  const { data: { user: adminUser }, error: authError } = await adminClient.auth.getUser(authToken);
 
   if (authError || !adminUser) {
     return new Response(JSON.stringify({ error: "not_authenticated" }), {
@@ -163,14 +163,14 @@ serve(async (req) => {
   }
 
   // Generar token único
-  const token = crypto.randomUUID();
+  const invitationToken = crypto.randomUUID();
 
   // Crear invitación
   const { data: invitation, error: invitationError } = await adminClient
     .from('invitations')
     .insert({
       email,
-      token,
+      token: invitationToken,
       role: mappedRole,
       department_id: departmentId,
       company_id: targetCompanyId,

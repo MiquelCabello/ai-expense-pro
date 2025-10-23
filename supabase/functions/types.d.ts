@@ -15,12 +15,9 @@ declare module "https://deno.land/std@0.168.0/http/server.ts" {
   ): Promise<void>
 }
 
-declare namespace Deno {
-  export const env: {
-    get(name: string): string | undefined
-  }
-}
 
 declare module "https://esm.sh/@supabase/supabase-js@2" {
   export * from "@supabase/supabase-js"
 }
+
+// Removed Deno.env declaration - it's already provided by Deno runtime

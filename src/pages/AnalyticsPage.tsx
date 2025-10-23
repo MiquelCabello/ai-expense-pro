@@ -23,7 +23,7 @@ interface AnalyticsData {
 
 export default function AnalyticsPage() {
   const { company, membership, user } = useAuthV2()
-  const accountId = company?.id ?? null
+  const companyId = company?.id ?? null
   const [analytics, setAnalytics] = useState<AnalyticsData>({
     totalExpenses: 0,
     expenseCount: 0,
@@ -37,13 +37,13 @@ export default function AnalyticsPage() {
   const [statusFilter, setStatusFilter] = useState<'APPROVED' | 'PENDING' | 'REJECTED' | 'ALL'>('APPROVED')
 
   useEffect(() => {
-    if (!accountId) return
+    if (!companyId) return
     fetchAnalytics()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountId, timeRange, statusFilter])
+  }, [companyId, timeRange, statusFilter])
 
   const fetchAnalytics = async () => {
-    if (!accountId) return
+    if (!companyId) return
 
     try {
       setLoading(true)
@@ -70,7 +70,7 @@ export default function AnalyticsPage() {
       let query = supabase
         .from('expenses')
         .select(`*, categories(name)`) // NOTE: join simple para nombre de categoría
-        .eq('account_id', accountId)
+        .eq('company_id', companyId)
         .gte('expense_date', toLocalISODate(startDate))
         .lte('expense_date', toLocalISODate(endDate))
 
