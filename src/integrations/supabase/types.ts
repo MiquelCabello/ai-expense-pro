@@ -701,6 +701,18 @@ export type Database = {
         Args: { target_company: string }
         Returns: number
       }
+      get_company_employees: {
+        Args: { p_company_id: string }
+        Returns: {
+          company_id: string
+          created_at: string
+          department_id: string
+          email: string
+          role: Database["public"]["Enums"]["role_company"]
+          updated_at: string
+          user_id: string
+        }[]
+      }
       get_company_from_account: {
         Args: { account_uuid: string }
         Returns: string

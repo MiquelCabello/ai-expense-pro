@@ -96,50 +96,48 @@ export default function EmployeesPage() {
   }, [canAssignRoles, canAssignDepartment]);
 
   const fetchEmployees = useCallback(async () => {
+    if (!accountId) {
+      setEmployees([]);
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
 
-      // Usar memberships con join a profiles_v2
-      let query = supabase
-        .from('memberships')
-        .select(`
-          *,
-          profiles_v2!inner(email)
-        `)
-        .order('created_at', { ascending: false });
+      // Use RPC function to get employees with profile info
+      const { data, error } = await supabase
+        .rpc('get_company_employees', { p_company_id: accountId });
 
-      if (accountId) {
-        query = query.eq('company_id', accountId);
-      }
+      if (error) throw error;
+
+      // Filter employees based on role
+      let filteredData = data ?? [];
 
       // Excluir al owner de la lista
       if (company?.owner_user_id) {
-        query = query.neq('user_id', company.owner_user_id);
+        filteredData = filteredData.filter((emp: any) => emp.user_id !== company.owner_user_id);
       }
       
       // Excluir al usuario actual si es department_admin (no debe verse a sí mismo)
       if (isDepartmentAdmin && user?.id) {
-        query = query.neq('user_id', user.id);
+        filteredData = filteredData.filter((emp: any) => emp.user_id !== user.id);
       }
 
       // Si es admin de departamento, solo ver empleados de su departamento
       if (isDepartmentAdmin && membership?.department_id) {
-        query = query.eq('department_id', membership.department_id);
+        filteredData = filteredData.filter((emp: any) => emp.department_id === membership.department_id);
       }
 
-      const { data, error } = await query;
-
-      if (error) throw error;
-
-      // Transform memberships to Employee format
-      const resolvedEmployees: Employee[] = (data ?? []).map((m: any) => ({
-        id: m.user_id, // Use user_id as id for compatibility
-        user_id: m.user_id,
-        email: m.profiles_v2?.email ?? 'Sin email',
-        role: m.role,
-        department_id: m.department_id,
-        created_at: m.created_at,
-        company_id: m.company_id,
+      // Transform to Employee format
+      const resolvedEmployees: Employee[] = filteredData.map((emp: any) => ({
+        id: emp.user_id,
+        user_id: emp.user_id,
+        email: emp.email || 'Sin email',
+        role: emp.role,
+        department_id: emp.department_id,
+        created_at: emp.created_at,
+        company_id: emp.company_id,
       }));
 
       setEmployees(resolvedEmployees);
