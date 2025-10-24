@@ -2,8 +2,6 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 
-const OWNER_EMAIL = 'info@miquelcabello.com';
-
 export interface Company {
   id: string;
   name: string;
@@ -109,8 +107,16 @@ export function AuthV2Provider({ children }: { children: ReactNode }) {
         setCompany(null);
       }
 
-      const email = currentUser.email?.toLowerCase();
-      setIsMaster(email === OWNER_EMAIL);
+      // Check if user is master using database function
+      const { data: isMasterData, error: masterError } = await supabase
+        .rpc('is_global_admin');
+
+      if (masterError) {
+        console.error('[AuthV2] Error checking master status:', masterError);
+        setIsMaster(false);
+      } else {
+        setIsMaster(isMasterData || false);
+      }
 
       console.log('[AuthV2] Data loaded successfully');
     } catch (error) {
