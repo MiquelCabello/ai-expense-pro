@@ -370,19 +370,35 @@ export default function EmployeesPage() {
   };
 
   const getRoleBadge = (role: string) => {
-    if (role === 'ADMIN') {
+    if (role === 'owner') {
       return (
-        <Badge variant="default" className="gap-1">
+        <Badge variant="default" className="gap-1 bg-gradient-primary">
           <UserCheck className="h-3 w-3" />
-          Administrador
+          Propietario
         </Badge>
       );
     }
-    if (role === 'DEPARTMENT_ADMIN') {
+    if (role === 'company_admin') {
+      return (
+        <Badge variant="default" className="gap-1">
+          <UserCheck className="h-3 w-3" />
+          Admin Global
+        </Badge>
+      );
+    }
+    if (role === 'department_admin') {
       return (
         <Badge variant="outline" className="gap-1 border-primary text-primary">
           <Briefcase className="h-3 w-3" />
           Admin Departamento
+        </Badge>
+      );
+    }
+    if (role === 'global_admin') {
+      return (
+        <Badge variant="default" className="gap-1 bg-gradient-primary">
+          <UserCheck className="h-3 w-3" />
+          Admin Sistema
         </Badge>
       );
     }
@@ -394,19 +410,6 @@ export default function EmployeesPage() {
     );
   };
 
-  const getStatusBadge = (status: string) => {
-    return status === 'ACTIVE' ? (
-      <Badge variant="default" className="gap-1 bg-success">
-        <UserCheck className="h-3 w-3" />
-        Activo
-      </Badge>
-    ) : (
-      <Badge variant="destructive" className="gap-1">
-        <UserX className="h-3 w-3" />
-        Inactivo
-      </Badge>
-    );
-  };
 
   const filteredEmployees = employees.filter(employee => {
     const searchLower = searchTerm.toLowerCase();

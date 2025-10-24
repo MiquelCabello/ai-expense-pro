@@ -696,10 +696,7 @@ export type Database = {
         Args: { target_company: string }
         Returns: Database["public"]["Enums"]["plan_tier"]
       }
-      current_postgres_version: {
-        Args: Record<PropertyKey, never>
-        Returns: string
-      }
+      current_postgres_version: { Args: never; Returns: string }
       effective_category_limit_dual: {
         Args: { target_company: string }
         Returns: number
@@ -709,7 +706,7 @@ export type Database = {
         Returns: string
       }
       get_migration_status: {
-        Args: Record<PropertyKey, never>
+        Args: never
         Returns: {
           migrated_count: number
           migration: string
@@ -717,10 +714,7 @@ export type Database = {
           total_original: number
         }[]
       }
-      get_user_email: {
-        Args: { target_user_id: string }
-        Returns: string
-      }
+      get_user_email: { Args: { target_user_id: string }; Returns: string }
       get_user_role_dual: {
         Args: { target_company: string; target_user_id: string }
         Returns: Database["public"]["Enums"]["role_type"]
@@ -741,42 +735,20 @@ export type Database = {
         Args: { target_company_id: string }
         Returns: boolean
       }
-      is_account_owner: {
-        Args: { a_id: string }
-        Returns: boolean
-      }
-      is_employee_dual: {
-        Args: { target_company: string }
-        Returns: boolean
-      }
-      is_global_admin: {
-        Args: Record<PropertyKey, never>
-        Returns: boolean
-      }
-      is_leaked_password_protection_enabled: {
-        Args: Record<PropertyKey, never>
-        Returns: boolean
-      }
-      is_master_dual: {
-        Args: Record<PropertyKey, never>
-        Returns: boolean
-      }
-      is_master_user: {
-        Args: { _email: string } | { _uid: string }
-        Returns: boolean
-      }
+      is_account_owner: { Args: { a_id: string }; Returns: boolean }
+      is_employee_dual: { Args: { target_company: string }; Returns: boolean }
+      is_global_admin: { Args: never; Returns: boolean }
+      is_leaked_password_protection_enabled: { Args: never; Returns: boolean }
+      is_master_dual: { Args: never; Returns: boolean }
+      is_master_user:
+        | { Args: { _uid: string }; Returns: boolean }
+        | { Args: { _email: string }; Returns: boolean }
       is_member_of_company_dual: {
         Args: { target_company: string }
         Returns: boolean
       }
-      my_department_id: {
-        Args: { c_id: string }
-        Returns: string
-      }
-      set_safe_search_path: {
-        Args: Record<PropertyKey, never>
-        Returns: undefined
-      }
+      my_department_id: { Args: { c_id: string }; Returns: string }
+      set_safe_search_path: { Args: never; Returns: undefined }
     }
     Enums: {
       account_role: "account_owner"
