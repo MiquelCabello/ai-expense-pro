@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
-import { useAuth } from '@/hooks/useAuth'
+import { useAuthV2 } from '@/hooks/useAuthV2'
 import { supabase } from '@/integrations/supabase/client'
 import type { TablesInsert } from '@/integrations/supabase/types'
 import { toast } from 'sonner'
@@ -170,14 +170,12 @@ const normalizeAIResponse = (raw: any): ExtractedData => {
 }
 
 export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) {
-  const { user, profile, account, isMaster } = useAuth()
+  const { user, membership, company, isMaster } = useAuthV2()
 
   const isAdmin = useMemo(() => {
-    const roleStr = (profile as any)?.role ? String((profile as any).role).toLowerCase() : ''
-    const flag = (profile as any)?.is_admin === true
-    const roles = (user?.app_metadata?.roles as string[] | undefined) ?? []
-    return flag || roleStr.includes('admin') || roleStr.includes('administrador') || roleStr.includes('owner') || roles.includes('admin') || roles.includes('owner')
-  }, [profile, user])
+    if (isMaster) return true
+    return membership?.role === 'owner' || membership?.role === 'company_admin' || membership?.role === 'global_admin'
+  }, [membership, isMaster])
 
   const [step, setStep] = useState<'upload' | 'review'>('upload')
   const [modalOpen, setModalOpen] = useState(false)
@@ -194,14 +192,14 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
   const [aiClassification, setAiClassification] = useState<ClassificationResult | null>(null)
 
   const [selfEmployee, setSelfEmployee] = useState<any | null>(null)
-  const [accountId, setAccountId] = useState<string | null>(profile?.account_id ?? account?.id ?? null)
+  const [accountId, setAccountId] = useState<string | null>(company?.id ?? null)
   const [projects_list, setProjectsList] = useState<any[]>([])
   const [employees_list, setEmployeesList] = useState<any[]>([])
   const [categories_list, setCategoriesList] = useState<any[]>([])
   const [categoryIndex, setCategoryIndex] = useState<Record<string, string>>({})
   const [monthlyUsage, setMonthlyUsage] = useState<number | null>(null)
-  const monthlyLimit = typeof account?.monthly_expense_limit === 'number' ? account.monthly_expense_limit : null
-  const monthlyLimitKey = account?.monthly_expense_limit ?? null
+  const monthlyLimit = typeof company?.monthly_expense_limit === 'number' ? company.monthly_expense_limit : null
+  const monthlyLimitKey = company?.monthly_expense_limit ?? null
   const limitApplies = !isMaster && typeof monthlyLimit === 'number'
   const hasReachedMonthlyLimit = limitApplies && monthlyLimit !== null && typeof monthlyUsage === 'number' && monthlyUsage >= monthlyLimit
   const remainingMonthlySlots = limitApplies && monthlyLimit !== null && typeof monthlyUsage === 'number'
@@ -220,8 +218,8 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
   ) : null
 
   React.useEffect(() => {
-    setAccountId(profile?.account_id ?? account?.id ?? null)
-  }, [profile?.account_id, account?.id])
+    setAccountId(company?.id ?? null)
+  }, [company?.id])
 
   React.useEffect(() => {
     if (!limitApplies || !accountId) {
@@ -237,7 +235,7 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
       const { count, error } = await supabase
         .from('expenses')
         .select('id', { count: 'exact', head: true })
-        .eq('account_id', accountId)
+        .eq('company_id', accountId)
         .gte('expense_date', monthStart.toISOString().slice(0, 10))
         .lt('expense_date', monthEnd.toISOString().slice(0, 10))
 
@@ -277,8 +275,9 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
   const [creatingCategory, setCreatingCategory] = useState(false)
 
   const displayName =
-    selfEmployee?.full_name ?? (profile as any)?.full_name ?? (profile as any)?.name ??
-    (user?.user_metadata?.full_name as string | undefined) ?? (user?.user_metadata?.name as string | undefined) ??
+    selfEmployee?.full_name ?? 
+    (user?.user_metadata?.full_name as string | undefined) ?? 
+    (user?.user_metadata?.name as string | undefined) ??
     user?.email ?? ''
 
   const normalizeText = useCallback((s?: string) => {
@@ -307,30 +306,20 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
 
   React.useEffect(() => { setCategoryIndex(buildCategoryIndex(categories_list)) }, [categories_list, buildCategoryIndex])
 
-  // Self employee (tolerante si no existe la tabla employees)
+  // Self employee (using authV2 system)
   React.useEffect(() => {
     if (!user?.id) return
-    ;(async () => {
-      try {
-        const { data: emp, error } = await (supabase as any)
-          .from('employees')
-          .select('id, full_name, user_id, account_id')
-          .eq('user_id', user.id)
-          .maybeSingle()
-        if (error) throw error
-        if (emp) { setSelfEmployee(emp); setAccountId(emp.account_id || null); setFormData((p) => ({ ...p, employee_id: emp.id })) }
-        else setFormData((p) => ({ ...p, employee_id: user.id }))
-      } catch { setFormData((p) => ({ ...p, employee_id: user.id })) }
-    })()
+    // Set employee_id to current user
+    setFormData((p) => ({ ...p, employee_id: user.id }))
   }, [user?.id])
 
   // project_codes (fallback si no hay columna status)
   React.useEffect(() => {
     ;(async () => {
       try {
-        let q = supabase.from('project_codes').select('*').order('code'); if (accountId) q = q.eq('account_id', accountId)
+        let q = supabase.from('project_codes').select('*').order('code'); if (accountId) q = q.eq('company_id', accountId)
         const { data, error } = await q.eq('status', 'ACTIVE')
-        if (error) { let q2 = supabase.from('project_codes').select('*').order('code'); if (accountId) q2 = q2.eq('account_id', accountId); const { data: d2 } = await q2; setProjectsList(sortProjects(d2 || [])); return }
+        if (error) { let q2 = supabase.from('project_codes').select('*').order('code'); if (accountId) q2 = q2.eq('company_id', accountId); const { data: d2 } = await q2; setProjectsList(sortProjects(d2 || [])); return }
         setProjectsList(sortProjects(data || []))
       } catch {}
     })()
@@ -340,15 +329,15 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
   React.useEffect(() => {
     ;(async () => {
       try {
-        let q = supabase.from('categories').select('*').order('name'); if (accountId) q = q.eq('account_id', accountId)
+        let q = supabase.from('categories').select('*').order('name'); if (accountId) q = q.eq('company_id', accountId)
         const { data, error } = await (q as any).eq('status', 'ACTIVE')
-        if (error) { let q2 = supabase.from('categories').select('*').order('name'); if (accountId) q2 = q2.eq('account_id', accountId); const { data: d2 } = await q2; setCategoriesList(sortCategories(d2 || [])); return }
+        if (error) { let q2 = supabase.from('categories').select('*').order('name'); if (accountId) q2 = q2.eq('company_id', accountId); const { data: d2 } = await q2; setCategoriesList(sortCategories(d2 || [])); return }
         setCategoriesList(sortCategories(data || []))
       } catch {}
     })()
   }, [accountId, sortCategories])
 
-  // employees (solo admin; tolerante si la tabla no existe o no tiene status)
+  // employees (solo admin; load from memberships)
   React.useEffect(() => {
     if (!accountId || !isAdmin) {
       setEmployeesList([])
@@ -357,18 +346,17 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
     ;(async () => {
       try {
         const { data, error } = await supabase
-          .from('profiles')
-          .select('user_id, name, status')
-          .eq('account_id', accountId)
-          .eq('status', 'ACTIVE')
-          .order('name')
+          .from('memberships')
+          .select('user_id, profiles_v2(email)')
+          .eq('company_id', accountId)
+          .order('created_at')
         if (error) throw error
-        const normalized = (data || []).map((item) => ({
+        const normalized = (data || []).map((item: any) => ({
           id: item.user_id,
-          full_name: item.name,
-          email: '',
-          account_id: accountId,
-          status: item.status,
+          full_name: item.profiles_v2?.email || '', 
+          email: item.profiles_v2?.email || '',
+          company_id: accountId,
+          status: 'ACTIVE',
         }))
         setEmployeesList(normalized)
       } catch {
@@ -384,7 +372,7 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
       .on('postgres_changes', { event: '*', schema: 'public', table: 'project_codes' }, (payload) => {
         try {
           const n: any = (payload as any).new; const o: any = (payload as any).old
-          const ok = accountId ? (n?.account_id ?? o?.account_id) === accountId : true
+          const ok = accountId ? (n?.company_id ?? o?.company_id) === accountId : true
           if (!ok) return
           const add = () => setProjectsList((p) => sortProjects([...p.filter((x) => x.id !== n.id), n]))
           if ((payload as any).eventType === 'DELETE') setProjectsList((p) => p.filter((x) => x.id !== o?.id))
@@ -398,7 +386,7 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
       .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, (payload) => {
         try {
           const n: any = (payload as any).new; const o: any = (payload as any).old
-          const within = accountId ? (n?.account_id ?? o?.account_id) === accountId : true
+          const within = accountId ? (n?.company_id ?? o?.company_id) === accountId : true
           if (!within) return
           if ((payload as any).eventType === 'DELETE') setCategoriesList((prev) => prev.filter((c) => c.id !== o?.id))
           else setCategoriesList((prev) => sortCategories([...prev.filter((c) => c.id !== n.id), n]))
@@ -471,7 +459,7 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         const fd = new FormData()
         fd.append('file', file, file.name); fd.append('userId', user.id); fd.append('file_url', signed.signedUrl)
         fd.append('provider', 'GEMINI'); fd.append('mime_type', file.type)
-        if (accountId) fd.append('account_id', accountId)
+        if (accountId) fd.append('company_id', accountId)
         if (formData.project_code_id) fd.append('project_code_id', formData.project_code_id)
         if (formData.notes) fd.append('notes', formData.notes)
         const res = await fetch(fnUrl, { method: 'POST', headers: { Authorization: `Bearer ${sessionRes.session?.access_token ?? ''}` }, body: fd })
@@ -632,23 +620,20 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
   const handleCreateCategory = async () => {
     const name = categoryProposedName.trim()
     if (!name) { toast.error('El nombre de la categoría no puede estar vacío'); return }
-    if (!account?.can_add_custom_categories) {
-      toast.error('Tu plan actual no permite crear nuevas categorías automáticamente')
-      return
-    }
+    // Remove plan check - just try to create the category
     if (!accountId) {
       toast.error('No se pudo asociar la categoría con tu cuenta')
       return
     }
     setCreatingCategory(true)
     try {
-      const base: TablesInsert<'categories'> & { status?: 'ACTIVE' | 'INACTIVE' } = { name, account_id: accountId, status: 'ACTIVE' }
+      const base: TablesInsert<'categories'> & { status?: 'ACTIVE' | 'INACTIVE' } = { name, company_id: accountId, status: 'ACTIVE' }
       const { data, error } = await supabase.from('categories').insert(base).select('*').single()
       let createdCategory = data
 
       if (error) {
         // Reintento sin columna status
-        const base2: TablesInsert<'categories'> = { name, account_id: accountId }
+        const base2: TablesInsert<'categories'> = { name, company_id: accountId }
         const { data: fallbackData, error: fallbackError } = await supabase
           .from('categories')
           .insert(base2)
@@ -740,7 +725,7 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         currency: formData.currency,
         payment_method: formData.payment_method,
         notes: formData.notes,
-        account_id: accountId,
+        company_id: accountId,
         receipt_file_id: receiptFileId,
         source: extractedData ? 'AI_EXTRACTED' : 'MANUAL',
         hash_dedupe: hashHex,

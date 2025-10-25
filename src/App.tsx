@@ -3,7 +3,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { AuthProvider, useAuth } from "@/hooks/useAuth";
+import { AuthV2Provider, useAuthV2 } from "@/hooks/useAuthV2";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import LandingPage from "./pages/LandingPage";
 import AuthPage from "./pages/AuthPage";
@@ -22,7 +22,7 @@ const queryClient = new QueryClient();
 
 // Protected Route Wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading } = useAuthV2();
 
   if (loading) {
     return (
@@ -44,7 +44,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 // Public Route Wrapper (redirects if authenticated)
 function PublicRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading } = useAuthV2();
 
   if (loading) {
     return (
@@ -68,63 +68,63 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider defaultTheme="light">
       <TooltipProvider>
-        <AuthProvider>
+        <AuthV2Provider>
           <Toaster />
           <Sonner />
-          <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-            <Routes>
-              <Route path="/" element={
-                <PublicRoute>
-                  <LandingPage />
-                </PublicRoute>
-              } />
-              <Route path="/auth" element={
-                <PublicRoute>
-                  <AuthPage />
-                </PublicRoute>
-              } />
-              <Route path="/registro-confirmacion" element={<RegistrationConfirmationPage />} />
-              <Route path="/accept-invite" element={<AcceptInvitePage />} />
-              <Route path="/empresa" element={
-                <ProtectedRoute>
-                  <CompanyProfilePage />
-                </ProtectedRoute>
-              } />
-              <Route path="/dashboard" element={
-                <ProtectedRoute>
-                  <Dashboard />
-                </ProtectedRoute>
-              } />
-              <Route path="/gastos" element={
-                <ProtectedRoute>
-                  <ExpensesPage />
-                </ProtectedRoute>
-              } />
-              <Route path="/analisis" element={
-                <ProtectedRoute>
-                  <AnalyticsPage />
-                </ProtectedRoute>
-              } />
-              <Route path="/empleados" element={
-                <ProtectedRoute>
-                  <EmployeesPage />
-                </ProtectedRoute>
-              } />
-              <Route path="/configuracion" element={
-                <ProtectedRoute>
-                  <ConfigurationPage />
-                </ProtectedRoute>
-              } />
-              <Route path="/upload" element={
-                <ProtectedRoute>
-                  <UploadPage />
-                </ProtectedRoute>
-              } />
-              {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-              <Route path="*" element={<NotFound />} />
+            <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+              <Routes>
+                <Route path="/" element={
+                  <PublicRoute>
+                    <LandingPage />
+                  </PublicRoute>
+                } />
+                <Route path="/auth" element={
+                  <PublicRoute>
+                    <AuthPage />
+                  </PublicRoute>
+                } />
+                <Route path="/registro-confirmacion" element={<RegistrationConfirmationPage />} />
+                <Route path="/accept-invite" element={<AcceptInvitePage />} />
+                <Route path="/empresa" element={
+                  <ProtectedRoute>
+                    <CompanyProfilePage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/dashboard" element={
+                  <ProtectedRoute>
+                    <Dashboard />
+                  </ProtectedRoute>
+                } />
+                <Route path="/gastos" element={
+                  <ProtectedRoute>
+                    <ExpensesPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/analisis" element={
+                  <ProtectedRoute>
+                    <AnalyticsPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/empleados" element={
+                  <ProtectedRoute>
+                    <EmployeesPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/configuracion" element={
+                  <ProtectedRoute>
+                    <ConfigurationPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/upload" element={
+                  <ProtectedRoute>
+                    <UploadPage />
+                  </ProtectedRoute>
+                } />
+                {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+                <Route path="*" element={<NotFound />} />
             </Routes>
           </BrowserRouter>
-        </AuthProvider>
+        </AuthV2Provider>
       </TooltipProvider>
     </ThemeProvider>
   </QueryClientProvider>

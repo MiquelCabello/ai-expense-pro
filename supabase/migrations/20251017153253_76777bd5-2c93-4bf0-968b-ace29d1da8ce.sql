@@ -1,0 +1,10 @@
+-- Añadir campos de información de empresa a la tabla companies
+ALTER TABLE public.companies 
+ADD COLUMN IF NOT EXISTS tax_id TEXT,
+ADD COLUMN IF NOT EXISTS address TEXT,
+ADD COLUMN IF NOT EXISTS city TEXT,
+ADD COLUMN IF NOT EXISTS postal_code TEXT,
+ADD COLUMN IF NOT EXISTS phone TEXT,
+ADD COLUMN IF NOT EXISTS email TEXT,
+ADD COLUMN IF NOT EXISTS website TEXT,
+ADD COLUMN IF NOT EXISTS description TEXT;
