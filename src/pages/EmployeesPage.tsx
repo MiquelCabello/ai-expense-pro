@@ -52,6 +52,8 @@ export default function EmployeesPage() {
     email: '',
     role: 'employee' as 'owner' | 'company_admin' | 'department_admin' | 'employee',
     department: '',
+    country: '',
+    city: '',
   });
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -223,6 +225,8 @@ export default function EmployeesPage() {
           email,
           role: sanitizedRole,
           department: canAssignDepartment ? sanitizedDepartment || null : null,
+          country: newEmployee.country.trim() || null,
+          city: newEmployee.city.trim() || null,
           companyId: accountId
         })
       });
@@ -250,7 +254,9 @@ export default function EmployeesPage() {
         name: '',
         email: '',
         role: 'employee',
-        department: ''
+        department: '',
+        country: '',
+        city: '',
       });
       fetchEmployees();
     } catch (error) {
@@ -497,98 +503,96 @@ export default function EmployeesPage() {
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4">
-                {(!canAssignRoles || !canAssignDepartment || !canAssignRegion) && (
-                  <p className="text-xs text-muted-foreground">
-                    {!canAssignRoles && "• No puedes asignar roles personalizados. "}
-                    {!canAssignDepartment && "• Los departamentos solo están disponibles en el plan Enterprise. "}
-                    {!canAssignRegion && "• No puedes asignar regiones. "}
-                    Los empleados recibirán acceso estándar.
-                  </p>
-                )}
                 <div className="space-y-2">
-                  <Label htmlFor="name">Nombre Completo</Label>
+                  <Label htmlFor="name">Nombre Completo *</Label>
                   <Input
                     id="name"
+                    placeholder="Juan Pérez"
                     value={newEmployee.name}
                     onChange={(e) => setNewEmployee({ ...newEmployee, name: e.target.value })}
-                    placeholder="Nombre del empleado"
                   />
                 </div>
+                
                 <div className="space-y-2">
-                  <Label htmlFor="email">Correo Electrónico</Label>
+                  <Label htmlFor="email">Correo Electrónico *</Label>
                   <Input
                     id="email"
                     type="email"
+                    placeholder="juan@empresa.com"
                     value={newEmployee.email}
                     onChange={(e) => setNewEmployee({ ...newEmployee, email: e.target.value })}
-                    placeholder="correo@empresa.com"
                   />
                 </div>
-                {(canAssignRoles || company?.plan === 'pro') && (
+
+                {canAssignRoles && (
                   <div className="space-y-2">
-                    <Label htmlFor="role">Rol</Label>
-                    <Select 
-                      value={newEmployee.role} 
-                      onValueChange={(value: 'owner' | 'company_admin' | 'department_admin' | 'employee') => setNewEmployee({ ...newEmployee, role: value })}
+                    <Label htmlFor="role">Rol *</Label>
+                    <Select
+                      value={newEmployee.role}
+                      onValueChange={(value: any) => setNewEmployee({ ...newEmployee, role: value })}
                     >
                       <SelectTrigger>
-                        <SelectValue />
+                        <SelectValue placeholder="Selecciona un rol" />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="employee">Empleado</SelectItem>
-                        {company?.plan === 'enterprise' && canAssignDepartment && (
-                          <SelectItem value="department_admin">Administrador de Departamento</SelectItem>
-                        )}
-                        {company?.plan === 'enterprise' && canAssignRoles && (
-                          <SelectItem value="company_admin">Administrador de Empresa</SelectItem>
-                        )}
+                        <SelectItem value="department_admin">Admin de Departamento</SelectItem>
+                        <SelectItem value="company_admin">Admin Global</SelectItem>
                       </SelectContent>
                     </Select>
-                    {newEmployee.role === 'department_admin' && (
-                      <p className="text-xs text-muted-foreground">
-                        Puede gestionar y ver gastos de su departamento (solo disponible en Enterprise).
-                      </p>
-                    )}
                   </div>
                 )}
+
                 {canAssignDepartment && (
                   <div className="space-y-2">
                     <Label htmlFor="department">Departamento</Label>
-                    {canAssignDepartment && (
-                      <div className="space-y-2">
-                        <Label htmlFor="department">Departamento</Label>
-                        {departments.length > 0 ? (
-                          <Select 
-                            value={newEmployee.department} 
-                            onValueChange={(value) => setNewEmployee({ ...newEmployee, department: value })}
-                          >
-                            <SelectTrigger id="department">
-                              <SelectValue placeholder="Selecciona un departamento" />
-                            </SelectTrigger>
-                            <SelectContent className="z-50 bg-popover">
-                              {departments.map((dept) => (
-                                <SelectItem key={dept.id} value={dept.name}>
-                                  {dept.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        ) : (
-                          <p className="text-xs text-muted-foreground py-2">
-                            No hay departamentos configurados. 
-                            <Button 
-                              variant="link" 
-                              className="h-auto p-0 ml-1 text-xs"
-                              onClick={() => window.location.href = '/configuracion'}
-                            >
-                              Crear departamentos
-                            </Button>
-                          </p>
-                        )}
-                      </div>
-                    )}
+                    <Select
+                      value={newEmployee.department}
+                      onValueChange={(value) => setNewEmployee({ ...newEmployee, department: value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecciona un departamento" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">Sin departamento</SelectItem>
+                        {departments.map((dept) => (
+                          <SelectItem key={dept.id} value={dept.name}>
+                            {dept.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 )}
+
+                <div className="space-y-2">
+                  <Label htmlFor="country">País</Label>
+                  <Input
+                    id="country"
+                    placeholder="España"
+                    value={newEmployee.country}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, country: e.target.value })}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="city">Ciudad</Label>
+                  <Input
+                    id="city"
+                    placeholder="Barcelona"
+                    value={newEmployee.city}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, city: e.target.value })}
+                  />
+                </div>
+
+                {(!canAssignRoles || !canAssignDepartment) && (
+                  <p className="text-xs text-muted-foreground">
+                    {!canAssignRoles && "• No puedes asignar roles personalizados. "}
+                    {!canAssignDepartment && "• Los departamentos solo están disponibles en el plan Enterprise. "}
+                    Los empleados recibirán acceso estándar.
+                  </p>
+                )}
+
                 <div className="flex justify-end gap-2 pt-4">
                   <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
                     Cancelar

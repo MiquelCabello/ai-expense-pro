@@ -98,6 +98,8 @@ serve(async (req) => {
     email?: string;
     role?: string;
     department?: string | null;
+    country?: string | null;
+    city?: string | null;
     companyId?: string;
   };
   
