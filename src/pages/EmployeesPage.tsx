@@ -551,10 +551,9 @@ export default function EmployeesPage() {
                       onValueChange={(value) => setNewEmployee({ ...newEmployee, department: value })}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Selecciona un departamento" />
+                        <SelectValue placeholder="Selecciona un departamento (opcional)" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">Sin departamento</SelectItem>
                         {departments.map((dept) => (
                           <SelectItem key={dept.id} value={dept.name}>
                             {dept.name}
