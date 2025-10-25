@@ -162,11 +162,29 @@ serve(async (req) => {
     departmentId = dept?.id || null;
   }
 
-  // Generar token único
-  const invitationToken = crypto.randomUUID();
+  // Usar Supabase Auth para invitar usuario (envía email automáticamente)
+  const { data: authData, error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(email, {
+    data: {
+      name,
+      role: mappedRole,
+      department_id: departmentId,
+      company_id: targetCompanyId,
+      invited_by: adminUser.id,
+    },
+    redirectTo: 'https://ai-expense-pro.vercel.app/auth',
+  });
 
-  // Crear invitación
-  const { data: invitation, error: invitationError } = await adminClient
+  if (inviteError) {
+    console.error('[create-employee] Failed to invite user:', inviteError);
+    return new Response(JSON.stringify({ error: inviteError.message }), {
+      status: 500,
+      headers: jsonHeaders,
+    });
+  }
+
+  // Crear registro en tabla invitations para tracking
+  const invitationToken = crypto.randomUUID();
+  await adminClient
     .from('invitations')
     .insert({
       email,
@@ -176,24 +194,12 @@ serve(async (req) => {
       company_id: targetCompanyId,
       invited_by: adminUser.id,
       expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-    })
-    .select()
-    .single();
-
-  if (invitationError) {
-    console.error('[create-employee] Failed to create invitation:', invitationError);
-    return new Response(JSON.stringify({ error: invitationError.message }), {
-      status: 500,
-      headers: jsonHeaders,
     });
-  }
-
-  const invitationUrl = `https://ai-expense-pro.vercel.app/accept-invite?token=${invitation.token}`;
 
   return new Response(JSON.stringify({ 
     success: true, 
-    invitation_url: invitationUrl,
-    message: 'Invitación creada exitosamente'
+    message: 'Invitación enviada exitosamente al correo ' + email,
+    user_id: authData.user?.id
   }), {
     status: 200,
     headers: jsonHeaders,
