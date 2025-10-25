@@ -587,22 +587,31 @@ export type Database = {
       profiles_v2: {
         Row: {
           avatar_file_id: string | null
+          city: string | null
+          country: string | null
           created_at: string
           email: string
+          name: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
           avatar_file_id?: string | null
+          city?: string | null
+          country?: string | null
           created_at?: string
           email: string
+          name?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
           avatar_file_id?: string | null
+          city?: string | null
+          country?: string | null
           created_at?: string
           email?: string
+          name?: string | null
           updated_at?: string
           user_id?: string
         }

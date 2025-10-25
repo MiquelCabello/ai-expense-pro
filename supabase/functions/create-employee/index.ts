@@ -164,6 +164,39 @@ serve(async (req) => {
     departmentId = dept?.id || null;
   }
 
+  // Usar Supabase Auth para invitar usuario (envía email automáticamente)
+  const { data: authData, error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(email, {
+    data: {
+      name,
+      role: mappedRole,
+      department_id: departmentId,
+      company_id: targetCompanyId,
+      invited_by: adminUser.id,
+      country: payload.country,
+      city: payload.city,
+    },
+    redirectTo: 'https://ai-expense-pro.vercel.app/auth',
+  });
+
+  if (inviteError) {
+    console.error('[create-employee] Failed to invite user:', inviteError);
+    return new Response(JSON.stringify({ error: inviteError.message }), {
+      status: 500,
+      headers: jsonHeaders,
+    });
+  }
+
+  // Crear/actualizar perfil con datos adicionales
+  await adminClient
+    .from('profiles_v2')
+    .upsert({
+      user_id: authData.user!.id,
+      email,
+      name,
+      country: payload.country || null,
+      city: payload.city || null,
+    });
+
   // Generar token único
   const invitationToken = crypto.randomUUID();
 
