@@ -16,6 +16,7 @@ import AnalyticsPage from "./pages/AnalyticsPage";
 import EmployeesPage from "./pages/EmployeesPage";
 import ConfigurationPage from "./pages/ConfigurationPage";
 import UploadPage from "./pages/UploadPage";
+import CorporateGroupPage from "./pages/CorporateGroupPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -118,6 +119,26 @@ const App = () => (
                 <Route path="/upload" element={
                   <ProtectedRoute>
                     <UploadPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/grupo" element={
+                  <ProtectedRoute>
+                    <CorporateGroupPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/grupo/empresas" element={
+                  <ProtectedRoute>
+                    <CorporateGroupPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/grupo/analytics" element={
+                  <ProtectedRoute>
+                    <CorporateGroupPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/grupo/config" element={
+                  <ProtectedRoute>
+                    <CorporateGroupPage />
                   </ProtectedRoute>
                 } />
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

@@ -2,6 +2,12 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 
+export interface Account {
+  id: string;
+  name: string;
+  owner_user_id: string;
+}
+
 export interface Company {
   id: string;
   name: string;
@@ -21,6 +27,7 @@ export interface Company {
   website?: string | null;
   description?: string | null;
   logo_url?: string | null;
+  account_id?: string | null;
 }
 
 export interface Membership {
@@ -45,6 +52,11 @@ interface AuthV2ContextType {
   profileV2: ProfileV2 | null;
   loading: boolean;
   isMaster: boolean;
+  isGroupAdmin: boolean;
+  account: Account | null;
+  managedCompanies: Company[];
+  selectedCompanyId: string | null;
+  setSelectedCompanyId: (id: string | null) => void;
   signOut: () => Promise<void>;
 }
 
@@ -58,6 +70,10 @@ export function AuthV2Provider({ children }: { children: ReactNode }) {
   const [profileV2, setProfileV2] = useState<ProfileV2 | null>(null);
   const [loading, setLoading] = useState(true);
   const [isMaster, setIsMaster] = useState(false);
+  const [isGroupAdmin, setIsGroupAdmin] = useState(false);
+  const [account, setAccount] = useState<Account | null>(null);
+  const [managedCompanies, setManagedCompanies] = useState<Company[]>([]);
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
 
   async function loadUserData(currentUser: User) {
     try {
@@ -75,6 +91,42 @@ export function AuthV2Provider({ children }: { children: ReactNode }) {
 
       console.log('[AuthV2] Profile loaded:', profile);
       setProfileV2(profile);
+
+      // Check if user is group admin via account_memberships
+      const { data: accountMembership, error: accountMembershipError } = await supabase
+        .from('account_memberships')
+        .select('*, accounts(*)')
+        .eq('user_id', currentUser.id)
+        .maybeSingle();
+
+      if (accountMembershipError) {
+        console.error('[AuthV2] Error loading account membership:', accountMembershipError);
+      }
+
+      console.log('[AuthV2] Account membership loaded:', accountMembership);
+
+      if (accountMembership) {
+        setIsGroupAdmin(true);
+        setAccount(accountMembership.accounts as Account);
+
+        // Load all companies for this account
+        const { data: accountCompanies, error: companiesError } = await supabase
+          .from('companies')
+          .select('*')
+          .eq('account_id', accountMembership.account_id);
+
+        if (companiesError) {
+          console.error('[AuthV2] Error loading account companies:', companiesError);
+        } else {
+          console.log('[AuthV2] Account companies loaded:', accountCompanies);
+          setManagedCompanies(accountCompanies || []);
+          
+          // If multiple companies, set first as selected by default
+          if (accountCompanies && accountCompanies.length > 0) {
+            setSelectedCompanyId(accountCompanies[0].id);
+          }
+        }
+      }
 
       const { data: memberships, error: membershipError } = await supabase
         .from('memberships')
@@ -137,6 +189,10 @@ export function AuthV2Provider({ children }: { children: ReactNode }) {
       setMembership(null);
       setProfileV2(null);
       setIsMaster(false);
+      setIsGroupAdmin(false);
+      setAccount(null);
+      setManagedCompanies([]);
+      setSelectedCompanyId(null);
       setLoading(false);
       return;
     }
@@ -175,6 +231,10 @@ export function AuthV2Provider({ children }: { children: ReactNode }) {
     setSession(null);
     setProfileV2(null);
     setIsMaster(false);
+    setIsGroupAdmin(false);
+    setAccount(null);
+    setManagedCompanies([]);
+    setSelectedCompanyId(null);
     await supabase.auth.signOut();
   };
 
@@ -188,6 +248,11 @@ export function AuthV2Provider({ children }: { children: ReactNode }) {
         profileV2,
         loading,
         isMaster,
+        isGroupAdmin,
+        account,
+        managedCompanies,
+        selectedCompanyId,
+        setSelectedCompanyId,
         signOut,
       }}
     >

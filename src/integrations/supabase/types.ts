@@ -705,11 +705,13 @@ export type Database = {
         Args: { target_company: string }
         Returns: Database["public"]["Enums"]["plan_tier"]
       }
+      count_account_companies: { Args: { a_id: string }; Returns: number }
       current_postgres_version: { Args: never; Returns: string }
       effective_category_limit_dual: {
         Args: { target_company: string }
         Returns: number
       }
+      get_account_companies: { Args: { a_id: string }; Returns: string[] }
       get_company_employees: {
         Args: { p_company_id: string }
         Returns: {
@@ -759,6 +761,7 @@ export type Database = {
       is_account_owner: { Args: { a_id: string }; Returns: boolean }
       is_employee_dual: { Args: { target_company: string }; Returns: boolean }
       is_global_admin: { Args: never; Returns: boolean }
+      is_group_admin: { Args: never; Returns: boolean }
       is_leaked_password_protection_enabled: { Args: never; Returns: boolean }
       is_master_dual: { Args: never; Returns: boolean }
       is_master_user:
