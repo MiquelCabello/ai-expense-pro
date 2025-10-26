@@ -13,8 +13,7 @@ import {
   Search,
   Plus,
   Bell,
-  Building2,
-  Database
+  Building2
 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
@@ -144,11 +143,6 @@ export default function Sidebar() {
           href: '/configuracion',
           icon: Settings,
           current: location.pathname === '/configuracion'
-        }, {
-          name: 'Test Migración',
-          href: '/migration-test',
-          icon: Database,
-          current: location.pathname === '/migration-test'
         }]
         : [])
     ];
