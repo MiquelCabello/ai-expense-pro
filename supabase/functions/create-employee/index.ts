@@ -164,7 +164,11 @@ serve(async (req) => {
     departmentId = dept?.id || null;
   }
 
-  // Usar Supabase Auth para invitar usuario (envía email automáticamente)
+  // Generar token único ANTES de invitar
+  const invitationToken = crypto.randomUUID();
+  const invitationUrl = `https://ai-expense-pro.vercel.app/accept-invite?token=${invitationToken}`;
+
+  // Usar Supabase Auth para invitar usuario (envía email automáticamente con el link de activación)
   const { data: authData, error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(email, {
     data: {
       name,
@@ -175,7 +179,7 @@ serve(async (req) => {
       country: payload.country,
       city: payload.city,
     },
-    redirectTo: 'https://ai-expense-pro.vercel.app/auth',
+    redirectTo: invitationUrl,
   });
 
   if (inviteError) {
@@ -196,9 +200,6 @@ serve(async (req) => {
       country: payload.country || null,
       city: payload.city || null,
     });
-
-  // Generar token único
-  const invitationToken = crypto.randomUUID();
 
   // Crear invitación
   const { data: invitation, error: invitationError } = await adminClient
@@ -223,12 +224,10 @@ serve(async (req) => {
     });
   }
 
-  const invitationUrl = `https://ai-expense-pro.vercel.app/accept-invite?token=${invitation.token}`;
-
   return new Response(JSON.stringify({ 
     success: true, 
     invitation_url: invitationUrl,
-    message: 'Invitación creada exitosamente'
+    message: 'Invitación enviada. El empleado recibirá un email para activar su cuenta.'
   }), {
     status: 200,
     headers: jsonHeaders,
