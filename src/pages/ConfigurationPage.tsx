@@ -400,10 +400,14 @@ export default function ConfigurationPage() {
 
       if (updateError) throw updateError;
 
-      // Actualizar el estado local inmediatamente
-      setCompanyInfo(prev => ({ ...prev, logo_url: publicUrl }));
+      // Actualizar el estado local inmediatamente con cachebuster
+      const logoUrlWithCachebuster = `${publicUrl}?t=${Date.now()}`;
+      setCompanyInfo(prev => ({ ...prev, logo_url: logoUrlWithCachebuster }));
       
       toast.success('Logo actualizado correctamente');
+      
+      // Recargar datos para refrescar el contexto completo
+      await loadData();
     } catch (error) {
       console.error('Error uploading logo:', error);
       toast.error('Error al subir el logo');
