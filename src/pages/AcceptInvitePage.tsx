@@ -6,7 +6,22 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { Loader2, AlertCircle, ShieldCheck, Lock, ArrowLeft } from 'lucide-react';
+import { Loader2, AlertCircle, ShieldCheck, Lock, ArrowLeft, Check, X } from 'lucide-react';
+
+const validatePassword = (password: string) => {
+  return {
+    minLength: password.length >= 8,
+    hasLowercase: /[a-z]/.test(password),
+    hasUppercase: /[A-Z]/.test(password),
+    hasNumber: /[0-9]/.test(password),
+    hasSpecialChar: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~]/.test(password),
+  };
+};
+
+const isPasswordValid = (password: string) => {
+  const validation = validatePassword(password);
+  return Object.values(validation).every(v => v);
+};
 
 export default function AcceptInvitePage() {
   const [searchParams] = useSearchParams();
@@ -77,8 +92,8 @@ export default function AcceptInvitePage() {
 
     if (!invitation) return;
 
-    if (password.length < 8) {
-      toast.error('La contraseña debe tener al menos 8 caracteres');
+    if (!isPasswordValid(password)) {
+      toast.error('La contraseña no cumple con todos los requisitos de seguridad');
       return;
     }
 
@@ -103,7 +118,13 @@ export default function AcceptInvitePage() {
       if (error) {
         console.error('[AcceptInvite] Error completing invitation:', error);
         console.error('[AcceptInvite] Error details:', JSON.stringify(error, null, 2));
-        toast.error('No se pudo completar la invitación. Por favor, contacta al administrador.');
+        
+        // Check for weak password error
+        if (error.message?.includes('weak_password') || error.message?.includes('Password should contain')) {
+          toast.error('La contraseña no cumple con los requisitos de seguridad. Asegúrate de incluir mayúsculas, minúsculas, números y caracteres especiales.');
+        } else {
+          toast.error('No se pudo completar la invitación. Por favor, contacta al administrador.');
+        }
         setSubmitting(false);
         return;
       }
@@ -116,6 +137,8 @@ export default function AcceptInvitePage() {
           ? 'Ya existe una cuenta con este email.'
           : data.error === 'invitation_update_failed'
           ? 'Error al actualizar la invitación.'
+          : data.error?.includes('weak_password') || data.error?.includes('Password should contain')
+          ? 'La contraseña no cumple con los requisitos de seguridad. Debe incluir mayúsculas, minúsculas, números y caracteres especiales.'
           : data.error || 'Error al crear la cuenta.';
         toast.error(errorMessage);
         setSubmitting(false);
@@ -227,13 +250,40 @@ export default function AcceptInvitePage() {
                     type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Mínimo 8 caracteres"
+                    placeholder="Introduce tu contraseña"
                     className="pl-10"
                     required
-                    minLength={8}
                     disabled={submitting}
                   />
                 </div>
+                
+                {password && (
+                  <div className="mt-3 p-3 bg-muted/50 rounded-lg space-y-2 text-xs">
+                    <p className="font-medium text-foreground mb-2">Requisitos de contraseña:</p>
+                    <div className="space-y-1">
+                      <PasswordRequirement 
+                        met={validatePassword(password).minLength} 
+                        text="Mínimo 8 caracteres"
+                      />
+                      <PasswordRequirement 
+                        met={validatePassword(password).hasLowercase} 
+                        text="Al menos una letra minúscula (a-z)"
+                      />
+                      <PasswordRequirement 
+                        met={validatePassword(password).hasUppercase} 
+                        text="Al menos una letra mayúscula (A-Z)"
+                      />
+                      <PasswordRequirement 
+                        met={validatePassword(password).hasNumber} 
+                        text="Al menos un número (0-9)"
+                      />
+                      <PasswordRequirement 
+                        met={validatePassword(password).hasSpecialChar} 
+                        text="Al menos un carácter especial (!@#$...)"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -248,7 +298,6 @@ export default function AcceptInvitePage() {
                     placeholder="Repite tu contraseña"
                     className="pl-10"
                     required
-                    minLength={8}
                     disabled={submitting}
                   />
                 </div>
@@ -272,6 +321,21 @@ export default function AcceptInvitePage() {
           </CardContent>
         </Card>
       </div>
+    </div>
+  );
+}
+
+function PasswordRequirement({ met, text }: { met: boolean; text: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      {met ? (
+        <Check className="h-3.5 w-3.5 text-success" />
+      ) : (
+        <X className="h-3.5 w-3.5 text-muted-foreground" />
+      )}
+      <span className={met ? 'text-success' : 'text-muted-foreground'}>
+        {text}
+      </span>
     </div>
   );
 }
