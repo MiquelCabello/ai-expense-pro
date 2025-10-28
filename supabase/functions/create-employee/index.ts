@@ -146,10 +146,10 @@ serve(async (req) => {
     }
   }
 
-  // Mapear rol
-  const requestedRole = payload.role || 'EMPLOYEE';
-  const mappedRole = requestedRole === 'ADMIN' ? 'company_admin' : 
-                     requestedRole === 'DEPARTMENT_ADMIN' ? 'department_admin' : 'employee';
+  // Mapear rol (acepta tanto mayúsculas como minúsculas)
+  const requestedRole = (payload.role || 'employee').toLowerCase();
+  const mappedRole = requestedRole === 'company_admin' ? 'company_admin' : 
+                     requestedRole === 'department_admin' ? 'department_admin' : 'employee';
 
   // Obtener department_id
   let departmentId = null;
