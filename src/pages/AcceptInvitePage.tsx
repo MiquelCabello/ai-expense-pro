@@ -14,7 +14,7 @@ const validatePassword = (password: string) => {
     hasLowercase: /[a-z]/.test(password),
     hasUppercase: /[A-Z]/.test(password),
     hasNumber: /[0-9]/.test(password),
-    hasSpecialChar: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~]/.test(password),
+    hasSpecialChar: /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?`~]/.test(password),
   };
 };
 

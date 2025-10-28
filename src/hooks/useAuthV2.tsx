@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -178,7 +178,7 @@ export function AuthV2Provider({ children }: { children: ReactNode }) {
     }
   }
 
-  async function syncSession(nextSession: Session | null) {
+  const syncSession = useCallback(async (nextSession: Session | null) => {
     console.log('[AuthV2] Syncing session:', nextSession ? 'authenticated' : 'unauthenticated');
     
     setSession(nextSession);
@@ -201,7 +201,7 @@ export function AuthV2Provider({ children }: { children: ReactNode }) {
     setTimeout(() => {
       loadUserData(nextSession.user);
     }, 0);
-  }
+  }, []);
 
   useEffect(() => {
     console.log('[AuthV2] Initializing...');
@@ -221,7 +221,7 @@ export function AuthV2Provider({ children }: { children: ReactNode }) {
       console.log('[AuthV2] Cleaning up subscription');
       subscription.unsubscribe();
     };
-  }, []);
+  }, [syncSession]);
 
   const signOut = async () => {
     console.log('[AuthV2] Signing out...');

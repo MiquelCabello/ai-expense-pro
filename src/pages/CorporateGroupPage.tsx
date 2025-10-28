@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -31,23 +31,7 @@ export default function CorporateGroupPage() {
   const [companiesStats, setCompaniesStats] = useState<CompanyStats[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (!authLoading && !isGroupAdmin) {
-      navigate('/dashboard');
-      return;
-    }
-
-    if (!authLoading && managedCompanies.length === 0) {
-      navigate('/dashboard');
-      return;
-    }
-
-    if (!authLoading && managedCompanies.length > 0) {
-      loadCompaniesStats();
-    }
-  }, [authLoading, isGroupAdmin, managedCompanies, navigate]);
-
-  const loadCompaniesStats = async () => {
+  const loadCompaniesStats = useCallback(async () => {
     try {
       setLoading(true);
       const stats: CompanyStats[] = [];
@@ -91,7 +75,23 @@ export default function CorporateGroupPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [managedCompanies]);
+
+  useEffect(() => {
+    if (!authLoading && !isGroupAdmin) {
+      navigate('/dashboard');
+      return;
+    }
+
+    if (!authLoading && managedCompanies.length === 0) {
+      navigate('/dashboard');
+      return;
+    }
+
+    if (!authLoading && managedCompanies.length > 0) {
+      loadCompaniesStats();
+    }
+  }, [authLoading, isGroupAdmin, managedCompanies, navigate, loadCompaniesStats]);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('es-ES', {

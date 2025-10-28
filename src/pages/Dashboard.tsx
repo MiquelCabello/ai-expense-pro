@@ -191,7 +191,7 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, [resolvedAccountId, user, isMaster]);
+  }, [resolvedAccountId, user, isMaster, isEmployee]);
 
   useEffect(() => {
     if (!user && !isMaster) {
