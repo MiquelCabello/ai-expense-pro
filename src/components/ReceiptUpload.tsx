@@ -273,6 +273,11 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
   const [categoryPromptOpen, setCategoryPromptOpen] = useState(false)
   const [categoryProposedName, setCategoryProposedName] = useState('')
   const [creatingCategory, setCreatingCategory] = useState(false)
+  
+  // Modal para crear categoría desde la revisión
+  const [reviewCategoryDialogOpen, setReviewCategoryDialogOpen] = useState(false)
+  const [newCategoryName, setNewCategoryName] = useState('')
+  const [newCategoryBudget, setNewCategoryBudget] = useState('')
 
   const displayName =
     selfEmployee?.full_name ?? 
@@ -670,6 +675,71 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
     setStep('review')
   }
 
+  // Crear categoría desde el formulario de revisión
+  const handleCreateCategoryFromReview = async () => {
+    const name = newCategoryName.trim()
+    if (!name) {
+      toast.error('El nombre de la categoría no puede estar vacío')
+      return
+    }
+    
+    if (!accountId) {
+      toast.error('No se pudo asociar la categoría con tu cuenta')
+      return
+    }
+    
+    setCreatingCategory(true)
+    try {
+      const base: TablesInsert<'categories'> & { status?: 'ACTIVE' | 'INACTIVE' } = {
+        name,
+        company_id: accountId,
+        budget_monthly: newCategoryBudget ? parseFloat(newCategoryBudget) : null,
+        status: 'ACTIVE'
+      }
+      
+      const { data, error } = await supabase
+        .from('categories')
+        .insert(base)
+        .select('*')
+        .single()
+      
+      let createdCategory = data
+
+      if (error) {
+        // Reintento sin columna status
+        const base2: TablesInsert<'categories'> = {
+          name,
+          company_id: accountId,
+          budget_monthly: newCategoryBudget ? parseFloat(newCategoryBudget) : null
+        }
+        const { data: fallbackData, error: fallbackError } = await supabase
+          .from('categories')
+          .insert(base2)
+          .select('*')
+          .single()
+
+        if (fallbackError) throw fallbackError
+        createdCategory = fallbackData
+      }
+
+      if (!createdCategory) {
+        throw new Error('CATEGORY_NOT_CREATED')
+      }
+
+      // Actualizar listas y formulario
+      setCategoriesList((prev) => sortCategories([...(prev || []).filter((c) => c.id !== createdCategory.id), createdCategory]))
+      setFormData((p) => ({ ...p, category_id: createdCategory.id }))
+      toast.success('Categoría creada y seleccionada')
+      setReviewCategoryDialogOpen(false)
+      setNewCategoryName('')
+      setNewCategoryBudget('')
+    } catch (e: any) {
+      toast.error('No se pudo crear la categoría', { description: e?.message })
+    } finally {
+      setCreatingCategory(false)
+    }
+  }
+
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!user) return
@@ -866,12 +936,23 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
                 <Label className="flex items-center gap-2">Categoría *</Label>
-                <Select value={formData.category_id} onValueChange={(v) => setFormData((p) => ({ ...p, category_id: v }))}>
-                  <SelectTrigger><SelectValue placeholder="Seleccionar categoría" /></SelectTrigger>
-                  <SelectContent>
-                    {categories_list.map((c) => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}
-                  </SelectContent>
-                </Select>
+                <div className="flex gap-2">
+                  <Select value={formData.category_id} onValueChange={(v) => setFormData((p) => ({ ...p, category_id: v }))}>
+                    <SelectTrigger><SelectValue placeholder="Seleccionar categoría" /></SelectTrigger>
+                    <SelectContent>
+                      {categories_list.map((c) => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}
+                    </SelectContent>
+                  </Select>
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    size="icon"
+                    onClick={() => setReviewCategoryDialogOpen(true)}
+                    title="Crear nueva categoría"
+                  >
+                    <Tag className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -1085,6 +1166,65 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
             )}
             <Button type="button" onClick={handleCreateCategory} disabled={creatingCategory}>
               {creatingCategory ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creando…</>) : ('Crear y usar')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: crear categoría desde el formulario de revisión */}
+      <Dialog open={reviewCategoryDialogOpen} onOpenChange={(o) => setReviewCategoryDialogOpen(o)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Tag className="h-5 w-5" /> Nueva Categoría</DialogTitle>
+            <DialogDescription>
+              Crea una nueva categoría de gasto. Se seleccionará automáticamente después de crearla.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="newCategoryName">Nombre de la categoría *</Label>
+              <Input 
+                id="newCategoryName" 
+                value={newCategoryName} 
+                onChange={(e) => setNewCategoryName(e.target.value)} 
+                placeholder="Ej. Material de oficina" 
+                autoFocus
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="newCategoryBudget">Presupuesto mensual (opcional)</Label>
+              <Input 
+                id="newCategoryBudget" 
+                type="number" 
+                step="0.01"
+                value={newCategoryBudget} 
+                onChange={(e) => setNewCategoryBudget(e.target.value)} 
+                placeholder="0.00" 
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-3">
+            <Button 
+              type="button" 
+              variant="outline" 
+              onClick={() => {
+                setReviewCategoryDialogOpen(false)
+                setNewCategoryName('')
+                setNewCategoryBudget('')
+              }}
+              disabled={creatingCategory}
+            >
+              Cancelar
+            </Button>
+            <Button 
+              type="button" 
+              onClick={handleCreateCategoryFromReview} 
+              disabled={creatingCategory || !newCategoryName.trim()}
+            >
+              {creatingCategory ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creando…</>) : ('Crear categoría')}
             </Button>
           </DialogFooter>
         </DialogContent>
