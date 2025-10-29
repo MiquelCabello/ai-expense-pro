@@ -227,17 +227,6 @@ export default function Dashboard() {
     );
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Cargando dashboard...</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <AppLayout>
       <div className="p-6 space-y-6">

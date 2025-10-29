@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
+import { createContext, useContext, useEffect, useState, ReactNode, useCallback, useMemo } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -51,6 +51,7 @@ interface AuthV2ContextType {
   session: Session | null;
   profileV2: ProfileV2 | null;
   loading: boolean;
+  isDataReady: boolean;
   isMaster: boolean;
   isGroupAdmin: boolean;
   account: Account | null;
@@ -75,36 +76,57 @@ export function AuthV2Provider({ children }: { children: ReactNode }) {
   const [managedCompanies, setManagedCompanies] = useState<Company[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
 
+  const isDataReady = useMemo(() => {
+    if (loading) return false;
+    if (!user) return true; // No user = data is "ready" (empty state)
+    
+    // If user is master, they don't need membership/company
+    if (isMaster) return true;
+    
+    // For regular users, ensure critical data is loaded
+    return membership !== null || company !== null;
+  }, [loading, user, isMaster, membership, company]);
+
   async function loadUserData(currentUser: User) {
     try {
       console.log('[AuthV2] Loading user data for:', currentUser.id);
 
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles_v2')
-        .select('*')
-        .eq('user_id', currentUser.id)
-        .maybeSingle();
+      // Execute independent queries in parallel for better performance
+      const [
+        { data: profile, error: profileError },
+        { data: accountMembership, error: accountMembershipError },
+        { data: memberships, error: membershipError },
+        { data: isMasterData, error: masterError }
+      ] = await Promise.all([
+        supabase.from('profiles_v2').select('*').eq('user_id', currentUser.id).maybeSingle(),
+        supabase.from('account_memberships').select('*, accounts(*)').eq('user_id', currentUser.id).maybeSingle(),
+        supabase.from('memberships').select('*').eq('user_id', currentUser.id),
+        supabase.rpc('is_global_admin')
+      ]);
 
+      // Handle errors
       if (profileError) {
         console.error('[AuthV2] Error loading profile_v2:', profileError);
       }
-
-      console.log('[AuthV2] Profile loaded:', profile);
-      setProfileV2(profile);
-
-      // Check if user is group admin via account_memberships
-      const { data: accountMembership, error: accountMembershipError } = await supabase
-        .from('account_memberships')
-        .select('*, accounts(*)')
-        .eq('user_id', currentUser.id)
-        .maybeSingle();
-
       if (accountMembershipError) {
         console.error('[AuthV2] Error loading account membership:', accountMembershipError);
       }
+      if (membershipError) {
+        console.error('[AuthV2] Error loading memberships:', membershipError);
+      }
+      if (masterError) {
+        console.error('[AuthV2] Error checking master status:', masterError);
+      }
 
+      // Set profile
+      console.log('[AuthV2] Profile loaded:', profile);
+      setProfileV2(profile);
+
+      // Set master status
+      setIsMaster(isMasterData || false);
+
+      // Handle account memberships (group admin)
       console.log('[AuthV2] Account membership loaded:', accountMembership);
-
       if (accountMembership) {
         setIsGroupAdmin(true);
         setAccount(accountMembership.accounts as Account);
@@ -128,15 +150,7 @@ export function AuthV2Provider({ children }: { children: ReactNode }) {
         }
       }
 
-      const { data: memberships, error: membershipError } = await supabase
-        .from('memberships')
-        .select('*')
-        .eq('user_id', currentUser.id);
-
-      if (membershipError) {
-        console.error('[AuthV2] Error loading memberships:', membershipError);
-      }
-
+      // Handle memberships
       console.log('[AuthV2] Memberships loaded:', memberships);
       const userMembership = memberships?.[0] || null;
       setMembership(userMembership);
@@ -157,17 +171,6 @@ export function AuthV2Provider({ children }: { children: ReactNode }) {
       } else {
         console.log('[AuthV2] No membership found, setting company to null');
         setCompany(null);
-      }
-
-      // Check if user is master using database function
-      const { data: isMasterData, error: masterError } = await supabase
-        .rpc('is_global_admin');
-
-      if (masterError) {
-        console.error('[AuthV2] Error checking master status:', masterError);
-        setIsMaster(false);
-      } else {
-        setIsMaster(isMasterData || false);
       }
 
       console.log('[AuthV2] Data loaded successfully');
@@ -247,6 +250,7 @@ export function AuthV2Provider({ children }: { children: ReactNode }) {
         session,
         profileV2,
         loading,
+        isDataReady,
         isMaster,
         isGroupAdmin,
         account,

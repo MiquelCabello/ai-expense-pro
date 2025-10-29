@@ -23,14 +23,17 @@ const queryClient = new QueryClient();
 
 // Protected Route Wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuthV2();
+  const { user, loading, isDataReady } = useAuthV2();
 
-  if (loading) {
+  if (loading || (user && !isDataReady)) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Cargando...</p>
+        <div className="text-center space-y-4">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-primary mx-auto"></div>
+          <div>
+            <p className="text-lg font-medium text-foreground">Cargando tu espacio de trabajo</p>
+            <p className="text-sm text-muted-foreground mt-2">Obteniendo datos de la empresa...</p>
+          </div>
         </div>
       </div>
     );
