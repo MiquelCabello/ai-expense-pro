@@ -1091,7 +1091,7 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Confirmar datos básicos</DialogTitle>
-            <DialogDescription>Completa Empleado, Código de proyecto y Notas. Al confirmar, se subirá y analizará el ticket.</DialogDescription>
+            <DialogDescription>Completa Empleado, Código de proyecto, Categoría y Notas. Al confirmar, se subirá y analizará el ticket.</DialogDescription>
           </DialogHeader>
 
           {filePreview && (<div className="flex justify-center mb-4"><img src={filePreview} alt="Preview" className="max-h-48 rounded-md border" /></div>)}
@@ -1115,6 +1115,16 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
                 <SelectTrigger><SelectValue placeholder="Seleccionar proyecto (opcional)" /></SelectTrigger>
                 <SelectContent>
                   {projects_list.map((project) => (<SelectItem key={project.id} value={project.id}>{project.code} - {project.name}</SelectItem>))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2 md:col-span-2">
+              <Label className="flex items-center gap-2"><Tag className="h-4 w-4" /> Categoría</Label>
+              <Select value={formData.category_id} onValueChange={(v) => setFormData((p) => ({ ...p, category_id: v }))}>
+                <SelectTrigger><SelectValue placeholder="Seleccionar categoría (opcional)" /></SelectTrigger>
+                <SelectContent>
+                  {categories_list.map((cat) => (<SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>))}
                 </SelectContent>
               </Select>
             </div>
