@@ -177,6 +177,8 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
     return membership?.role === 'owner' || membership?.role === 'company_admin' || membership?.role === 'global_admin'
   }, [membership, isMaster])
 
+  const [companyPlan, setCompanyPlan] = useState<'free' | 'pro' | 'enterprise' | null>(null)
+
   const [step, setStep] = useState<'upload' | 'review'>('upload')
   const [modalOpen, setModalOpen] = useState(false)
   const [processing, setProcessing] = useState(false)
@@ -219,6 +221,27 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
 
   React.useEffect(() => {
     setAccountId(company?.id ?? null)
+  }, [company?.id])
+
+  // Obtener el plan de la compañía
+  React.useEffect(() => {
+    if (!company?.id) {
+      setCompanyPlan(null)
+      return
+    }
+    ;(async () => {
+      const { data, error } = await supabase
+        .from('companies')
+        .select('plan')
+        .eq('id', company.id)
+        .single()
+      if (error) {
+        console.warn('[ReceiptUpload] No se pudo obtener el plan', error)
+        setCompanyPlan(null)
+        return
+      }
+      setCompanyPlan(data?.plan as 'free' | 'pro' | 'enterprise' || null)
+    })()
   }, [company?.id])
 
   React.useEffect(() => {
@@ -440,6 +463,11 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
 
   const processWithAI = async () => {
     if (!file || !user) return
+    // Validar categoría obligatoria para planes Pro y Enterprise
+    if (companyPlan !== 'free' && !formData.category_id) {
+      toast.error('Por favor selecciona una categoría antes de continuar')
+      return
+    }
     setProcessing(true)
     try {
       const rfId = genId(); const fileExt = (file.name.split('.').pop() || 'bin').toLowerCase(); const filePath = `receipts/${user.id}/${rfId}.${fileExt}`
@@ -582,11 +610,7 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
       setAiClassification(ai)
       setDocType(ai.aiSuggestion === 'invoice' ? 'FACTURA' : 'TICKET')
 
-      const proposed = (norm.category_guess || norm.category_suggestion || '').trim()
-      const mappedCatId = mapCategoryNameToId(proposed)
-      const exactId = exactCategoryIdByName(proposed)
-
-      // Pre-rellenar datos del formulario
+      // Pre-rellenar datos del formulario (SIN tocar categoría ni proyecto)
       setFormData((prev) => ({
         ...prev,
         vendor: norm.vendor || prev.vendor,
@@ -596,22 +620,17 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         amount_gross: (norm.amount_gross ?? prev.amount_gross)?.toString?.() || prev.amount_gross,
         currency: norm.currency || prev.currency,
         notes: prev.notes || norm.notes || '',
-        category_id: mappedCatId || prev.category_id,
+        category_id: prev.category_id,  // ✅ Mantener siempre la del usuario
+        project_code_id: prev.project_code_id,  // ✅ Mantener siempre la del usuario
         invoice_number: norm.invoice_number || prev.invoice_number,
         company_tax_id: norm.tax_id || norm.seller_tax_id || prev.company_tax_id,
         company_address: norm.address || prev.company_address,
         company_email: norm.email || prev.company_email,
       }))
 
-      // Si la propuesta no existe EXACTA y mapeó a fallback → abrir modal
-      const needPrompt = !!proposed && !exactId && mappedCatId === fallbackCategoryId
-      if (needPrompt) {
-        setCategoryProposedName(proposed)
-        setCategoryPromptOpen(true)
-        setModalOpen(false)
-      } else {
-        setStep('review'); setModalOpen(false)
-      }
+      // Ir directamente a review sin lógica de categoría
+      setStep('review')
+      setModalOpen(false)
     } catch (error: any) {
       const msg: string = String(error?.message || error)
       if (msg.startsWith('UPLOAD_FAILED')) toast.error('No se pudo subir el archivo', { description: msg })
@@ -758,13 +777,19 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
       const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer)
       const hashHex = Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, '0')).join('')
 
+      // Validar categoría solo si no es plan Free
       let categoryId = formData.category_id
-      const exists = categories_list.some((c) => c.id === categoryId)
-      if (!exists) {
-        const remapped = mapCategoryNameToId(extractedData?.category_suggestion || extractedData?.category_guess || '')
-        if (remapped) categoryId = remapped
+      if (companyPlan !== 'free') {
+        const exists = categories_list.some((c) => c.id === categoryId)
+        if (!exists || !categoryId) { 
+          toast.error('Selecciona una categoría válida')
+          setUploading(false)
+          return 
+        }
+      } else {
+        // Plan Free: categoría no requerida
+        categoryId = ''
       }
-      if (!categoryId) { toast.error('Selecciona una categoría válida'); setUploading(false); return }
 
       const effectiveEmployeeId = formData.employee_id || (selfEmployee?.id as string | undefined) || (user.id as string)
 
@@ -785,8 +810,6 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
       const payload: any = {
         user_id: user.id, // satisface RLS (exp_insert_own)
         employee_id: effectiveEmployeeId,
-        project_code_id: formData.project_code_id || null,
-        category_id: categoryId,
         vendor: formData.vendor,
         expense_date: formData.expense_date,
         amount_net: Number(formData.amount_net || 0),
@@ -805,6 +828,12 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         doc_type_source, // 'ai' | 'user'
         classification_path, // 'R1' | 'R2' | 'R3' | 'R4'
         type: legacyType, // compatibilidad
+      }
+
+      // Solo agregar project_code_id y category_id si NO es plan Free
+      if (companyPlan !== 'free') {
+        payload.project_code_id = formData.project_code_id || null
+        payload.category_id = categoryId || null
       }
 
       if (legacyType === 'FACTURA') {
@@ -1091,7 +1120,11 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Confirmar datos básicos</DialogTitle>
-            <DialogDescription>Completa Empleado, Código de proyecto, Categoría y Notas. Al confirmar, se subirá y analizará el ticket.</DialogDescription>
+            <DialogDescription>
+              {companyPlan === 'free' 
+                ? 'Completa los datos básicos. Al confirmar, se subirá y analizará el ticket.'
+                : 'Completa Empleado, Código de proyecto, Categoría y Notas. Al confirmar, se subirá y analizará el ticket.'}
+            </DialogDescription>
           </DialogHeader>
 
           {filePreview && (<div className="flex justify-center mb-4"><img src={filePreview} alt="Preview" className="max-h-48 rounded-md border" /></div>)}
@@ -1109,25 +1142,31 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
               ) : (<Input value={displayName} disabled />)}
             </div>
 
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2"><Hash className="h-4 w-4" /> Código de Proyecto</Label>
-              <Select value={formData.project_code_id} onValueChange={(v) => setFormData((p) => ({ ...p, project_code_id: v }))}>
-                <SelectTrigger><SelectValue placeholder="Seleccionar proyecto (opcional)" /></SelectTrigger>
-                <SelectContent>
-                  {projects_list.map((project) => (<SelectItem key={project.id} value={project.id}>{project.code} - {project.name}</SelectItem>))}
-                </SelectContent>
-              </Select>
-            </div>
+            {/* Proyecto: solo para Pro/Enterprise */}
+            {companyPlan !== 'free' && (
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2"><Hash className="h-4 w-4" /> Código de Proyecto</Label>
+                <Select value={formData.project_code_id} onValueChange={(v) => setFormData((p) => ({ ...p, project_code_id: v }))}>
+                  <SelectTrigger><SelectValue placeholder="Seleccionar proyecto (opcional)" /></SelectTrigger>
+                  <SelectContent>
+                    {projects_list.map((project) => (<SelectItem key={project.id} value={project.id}>{project.code} - {project.name}</SelectItem>))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
-            <div className="space-y-2 md:col-span-2">
-              <Label className="flex items-center gap-2"><Tag className="h-4 w-4" /> Categoría</Label>
-              <Select value={formData.category_id} onValueChange={(v) => setFormData((p) => ({ ...p, category_id: v }))}>
-                <SelectTrigger><SelectValue placeholder="Seleccionar categoría (opcional)" /></SelectTrigger>
-                <SelectContent>
-                  {categories_list.map((cat) => (<SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>))}
-                </SelectContent>
-              </Select>
-            </div>
+            {/* Categoría: solo para Pro/Enterprise */}
+            {companyPlan !== 'free' && (
+              <div className="space-y-2 md:col-span-2">
+                <Label className="flex items-center gap-2"><Tag className="h-4 w-4" /> Categoría *</Label>
+                <Select value={formData.category_id} onValueChange={(v) => setFormData((p) => ({ ...p, category_id: v }))}>
+                  <SelectTrigger><SelectValue placeholder="Seleccionar categoría" /></SelectTrigger>
+                  <SelectContent>
+                    {categories_list.map((cat) => (<SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div className="space-y-2 md:col-span-2">
               <Label htmlFor="notes"><Tag className="h-4 w-4 inline mr-1" /> Notas</Label>
