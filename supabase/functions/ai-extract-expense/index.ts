@@ -57,7 +57,7 @@ type ExtractionOutcome =
   | { type: 'FACTURA'; data: InvoiceExtractResult }
   | { type: 'TICKET'; data: TicketExtractResult }
 
-const GEMINI_MODEL = Deno.env.get('GEMINI_MODEL') || 'gemini-1.5-pro-latest'
+const GEMINI_MODEL = Deno.env.get('GEMINI_MODEL') || 'gemini-1.5-flash'
 
 async function callGeminiJSON({
   apiKey,
