@@ -94,7 +94,17 @@ async function callGeminiJSON({
   for (let i = 0; i <= retries; i++) {
     try {
       const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`)
+      if (!res.ok) {
+        console.error('[ai-extract-expense] Gemini HTTP error', {
+          status: res.status,
+          statusText: res.statusText,
+          model: model,
+          hasApiKey: !!apiKey,
+          apiKeyPrefix: apiKey.substring(0, 10)
+        })
+        const errorText = await res.text().catch(() => 'No response body')
+        throw new Error(`Gemini HTTP ${res.status}: ${errorText}`)
+      }
       const j = await res.json()
       const text = j?.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
       if (!text) throw new Error('Gemini sin contenido')
@@ -103,6 +113,7 @@ async function callGeminiJSON({
       return parsed
     } catch (err) {
       lastErr = err
+      console.error(`[ai-extract-expense] Retry ${i}/${retries} failed:`, err)
       await sleep(200 * (i + 1))
     }
   }
@@ -192,7 +203,19 @@ serve(async (req: Request) => {
     return json({ success: true, classification, extraction })
   } catch (err: any) {
     console.error('[ai-extract-expense] error', err)
-    return json({ success: false, error: String(err?.message || err) }, { status: 500 })
+    const errorMessage = String(err?.message || err)
+    const isServiceUnavailable = errorMessage.includes('503') || errorMessage.includes('Service Unavailable')
+    
+    if (isServiceUnavailable) {
+      return json({ 
+        success: false, 
+        error: 'El servicio de análisis está temporalmente no disponible',
+        serviceError: true,
+        retryable: true
+      }, { status: 503 })
+    }
+    
+    return json({ success: false, error: errorMessage }, { status: 500 })
   }
 })
 

@@ -497,7 +497,20 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         if (formData.project_code_id) fd.append('project_code_id', formData.project_code_id)
         if (formData.notes) fd.append('notes', formData.notes)
         const res = await fetch(fnUrl, { method: 'POST', headers: { Authorization: `Bearer ${sessionRes.session?.access_token ?? ''}` }, body: fd })
-        if (!res.ok) { let msg = ''; try { const j = await res.json(); msg = j?.message || j?.error || '' } catch {}; throw new Error(`FN_${msg || res.statusText}`) }
+        if (!res.ok) { 
+          let errorData: any = {}
+          try { 
+            errorData = await res.json()
+          } catch {}
+          
+          if (res.status === 503) {
+            toast.error('El servicio de análisis está temporalmente no disponible. Por favor, intenta de nuevo en unos minutos.')
+            throw new Error('SERVICE_UNAVAILABLE')
+          }
+          
+          const msg = errorData?.message || errorData?.error || ''
+          throw new Error(`FN_${msg || res.statusText}`)
+        }
         aiData = await res.json()
       } catch (fnErr: any) {
         console.error('[DocType Debug] ai-extract-expense failed', fnErr)
@@ -506,6 +519,11 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
           status: fnErr?.status,
           response: fnErr?.response
         })
+        
+        if (fnErr?.message === 'SERVICE_UNAVAILABLE') {
+          throw fnErr
+        }
+        
         const allowLegacy = import.meta.env.VITE_ENABLE_LEGACY_RECEIPT_FUNC === 'true'
         if (!allowLegacy) {
           throw fnErr
@@ -526,6 +544,13 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         extractionType: aiData?.extraction?.type,
         keys: Object.keys(aiData || {})
       })
+
+      // Validación: verificar que aiData contiene datos útiles
+      if (!aiData || (!aiData.classification && !aiData.extraction && !aiData.data)) {
+        console.error('[DocType Debug] No valid data received from AI:', aiData)
+        toast.error('No se pudieron extraer datos del documento. Por favor, intenta de nuevo.')
+        throw new Error('NO_VALID_EXTRACTION_DATA')
+      }
 
       const norm = normalizeAIResponse(aiData)
       const meta = (aiData as Record<string, unknown>)?.meta as Record<string, unknown> | undefined
