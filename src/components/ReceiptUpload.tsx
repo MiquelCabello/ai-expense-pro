@@ -113,7 +113,8 @@ const toISODate = (val: any): string => {
 }
 
 const normalizeAIResponse = (raw: any): ExtractedData => {
-  const src = raw?.data ?? raw
+  // Soportar tanto el formato nuevo (extraction.data) como el legacy (data)
+  const src = raw?.extraction?.data ?? raw?.data ?? raw
   const vendor = pickField(src, 'vendor', 'merchant', 'commerce', 'company', 'company_name') ?? ''
   const expense_date = toISODate(pickField(src, 'expense_date', 'date', 'purchase_date', 'invoice_date') ?? '')
   const amount_gross = parseNumber(pickField(src, 'amount_gross', 'total', 'total_amount', 'amount')) ?? ((): number | undefined => {
@@ -545,7 +546,14 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
       }
 
       // NUEVO: aplicar reglas R1–R4 y fijar sugerencia + docType UI
-      const aiBackendType = (normForClassification.type || normForClassification.kind || '').toString().toUpperCase()
+      // Priorizar classification.type del backend
+      const aiBackendType = (
+        aiData?.classification?.type ?? 
+        aiData?.extraction?.type ?? 
+        normForClassification.type ?? 
+        normForClassification.kind ?? 
+        ''
+      ).toString().toUpperCase()
       const serverDocType = (meta?.final_doc_type as string | undefined)?.toUpperCase()
       const serverClassificationPath = meta?.classification_path as ClassificationResult['classification_path'] | undefined
 
