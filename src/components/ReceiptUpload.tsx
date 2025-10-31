@@ -501,6 +501,11 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         aiData = await res.json()
       } catch (fnErr: any) {
         console.error('[DocType Debug] ai-extract-expense failed', fnErr)
+        console.error('[DocType Debug] Error details:', {
+          message: fnErr?.message,
+          status: fnErr?.status,
+          response: fnErr?.response
+        })
         const allowLegacy = import.meta.env.VITE_ENABLE_LEGACY_RECEIPT_FUNC === 'true'
         if (!allowLegacy) {
           throw fnErr
@@ -512,6 +517,15 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         if (error) throw new Error(`FN_${error.message || 'extract-receipt failed'}`)
         aiData = data
       }
+
+      // Logging para debugging
+      console.log('[DocType Debug] aiData received:', {
+        hasClassification: !!aiData?.classification,
+        hasExtraction: !!aiData?.extraction,
+        classificationType: aiData?.classification?.type,
+        extractionType: aiData?.extraction?.type,
+        keys: Object.keys(aiData || {})
+      })
 
       const norm = normalizeAIResponse(aiData)
       const meta = (aiData as Record<string, unknown>)?.meta as Record<string, unknown> | undefined
@@ -554,6 +568,15 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         normForClassification.kind ?? 
         ''
       ).toString().toUpperCase()
+      
+      console.log('[DocType Debug] Classification decision:', {
+        aiBackendType,
+        fromClassification: aiData?.classification?.type,
+        fromExtraction: aiData?.extraction?.type,
+        fromNorm: normForClassification.type || normForClassification.kind,
+        extractedDataVendor: norm.vendor,
+        extractedDataAmount: norm.amount_gross
+      })
       const serverDocType = (meta?.final_doc_type as string | undefined)?.toUpperCase()
       const serverClassificationPath = meta?.classification_path as ClassificationResult['classification_path'] | undefined
 
