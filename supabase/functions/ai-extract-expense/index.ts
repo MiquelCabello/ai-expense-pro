@@ -2,9 +2,18 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
 const json = (body: unknown, init: ResponseInit = {}) =>
   new Response(JSON.stringify(body), {
-    headers: { "Content-Type": "application/json", ...(init.headers || {}) },
+    headers: { 
+      ...corsHeaders,
+      "Content-Type": "application/json", 
+      ...(init.headers || {}) 
+    },
     status: init.status ?? 200,
   })
 
@@ -114,7 +123,7 @@ function buildTicketExtractPrompt() {
 
 serve(async (req: Request) => {
   try {
-    if (req.method === 'OPTIONS') return new Response(null, { status: 204 })
+    if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders, status: 204 })
 
     const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY') || ''
     if (!GEMINI_API_KEY) return json({ success: false, error: 'Falta GEMINI_API_KEY' }, { status: 500 })
