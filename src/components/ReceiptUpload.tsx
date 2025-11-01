@@ -584,35 +584,65 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         norm.email = ((aiData?.data ?? aiData) as Record<string, unknown>).email as string
       }
 
-      // NUEVO: aplicar reglas R1–R4 y fijar sugerencia + docType UI
-      // Priorizar classification.type del backend
+      // NUEVO: PRIORIDAD JERÁRQUICA - Backend prevalece SIEMPRE
       const aiBackendType = (
         aiData?.classification?.type ?? 
         aiData?.extraction?.type ?? 
-        normForClassification.type ?? 
-        normForClassification.kind ?? 
         ''
       ).toString().toUpperCase()
       
-      console.log('[DocType Debug] Classification decision:', {
+      console.log('[DocType Debug] Backend classification received:', {
         aiBackendType,
         fromClassification: aiData?.classification?.type,
         fromExtraction: aiData?.extraction?.type,
-        fromNorm: normForClassification.type || normForClassification.kind,
-        extractedDataVendor: norm.vendor,
-        extractedDataAmount: norm.amount_gross
+        backendReason: aiData?.classification?.reason,
+        backendConfidence: aiData?.classification?.confidence
       })
+
       const serverDocType = (meta?.final_doc_type as string | undefined)?.toUpperCase()
       const serverClassificationPath = meta?.classification_path as ClassificationResult['classification_path'] | undefined
 
       let ai: ClassificationResult
+      let classificationSource: 'SERVER_META' | 'BACKEND_EXPLICIT' | 'BACKEND_VALIDATED' | 'LOCAL_FALLBACK' = 'LOCAL_FALLBACK'
+
       if (serverDocType) {
+        // Caso 1: Meta del servidor (legacy)
         ai = {
           aiSuggestion: serverDocType === 'FACTURA' ? 'invoice' : 'ticket',
-          classification_path:
-            serverClassificationPath ?? (serverDocType === 'FACTURA' ? 'R3' : 'R4'),
+          classification_path: serverClassificationPath ?? (serverDocType === 'FACTURA' ? 'R3' : 'R4'),
+        }
+        classificationSource = 'SERVER_META'
+      } else if (aiBackendType === 'FACTURA' || aiBackendType === 'TICKET') {
+        // Caso 2: Backend dio clasificación explícita
+        // ⚠️ VALIDAR coherencia: si dice FACTURA, debe tener datos mínimos
+        const hasInvoiceData = !!(
+          normForClassification.invoice_number ||
+          (normForClassification.seller_tax_id && normForClassification.buyer_tax_id) ||
+          normForClassification.ocr_text?.toLowerCase().includes('factura') ||
+          normForClassification.ocr_text?.toLowerCase().includes('invoice')
+        )
+
+        if (aiBackendType === 'FACTURA' && !hasInvoiceData) {
+          // Backend dice FACTURA pero faltan datos críticos → verificar con reglas locales
+          console.warn('[DocType] ⚠️ Backend says FACTURA but missing critical data. Falling back to local rules.')
+          ai = classifyDocType({
+            seller_tax_id: normForClassification.seller_tax_id || normForClassification.tax_id,
+            buyer_tax_id: normForClassification.buyer_tax_id,
+            invoice_number: normForClassification.invoice_number,
+            detected_keywords: normForClassification.detected_keywords,
+            ocr_text: normForClassification.ocr_text,
+          })
+          classificationSource = 'LOCAL_FALLBACK'
+        } else {
+          // Backend tiene clasificación válida → USAR SIEMPRE
+          ai = {
+            aiSuggestion: aiBackendType === 'FACTURA' ? 'invoice' : 'ticket',
+            classification_path: 'R1', // Backend tiene la mayor confianza
+          }
+          classificationSource = hasInvoiceData ? 'BACKEND_VALIDATED' : 'BACKEND_EXPLICIT'
         }
       } else {
+        // Caso 3: Backend no dio nada → usar reglas locales
         ai = classifyDocType({
           seller_tax_id: normForClassification.seller_tax_id || normForClassification.tax_id,
           buyer_tax_id: normForClassification.buyer_tax_id,
@@ -620,11 +650,32 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
           detected_keywords: normForClassification.detected_keywords,
           ocr_text: normForClassification.ocr_text,
         })
-
-        if (aiBackendType === 'FACTURA' && ai.aiSuggestion !== 'invoice') {
-          ai = { ...ai, aiSuggestion: 'invoice' }
-        }
+        classificationSource = 'LOCAL_FALLBACK'
       }
+
+      // Logging exhaustivo para debugging
+      console.log('[DocType] 🎯 FINAL CLASSIFICATION DECISION:', {
+        source: classificationSource,
+        finalType: ai.aiSuggestion === 'invoice' ? 'FACTURA' : 'TICKET',
+        path: ai.classification_path,
+        backendSaid: aiBackendType || 'N/A',
+        confidence: {
+          hasInvoiceNumber: !!normForClassification.invoice_number,
+          hasTwoTaxIds: !!(normForClassification.seller_tax_id && normForClassification.buyer_tax_id),
+          hasOcrKeywords: !!(
+            normForClassification.ocr_text?.toLowerCase().includes('factura') ||
+            normForClassification.ocr_text?.toLowerCase().includes('invoice')
+          ),
+          ocrTextLength: normForClassification.ocr_text?.length || 0
+        },
+        extractedFields: {
+          vendor: norm.vendor,
+          invoice_number: normForClassification.invoice_number,
+          seller_tax_id: normForClassification.seller_tax_id,
+          buyer_tax_id: normForClassification.buyer_tax_id,
+          amount_gross: norm.amount_gross
+        }
+      })
 
       if (DEBUG_DOC_TYPE) {
         const payload = (aiData?.data ?? aiData) as Record<string, unknown>
