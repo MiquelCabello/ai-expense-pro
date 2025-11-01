@@ -884,6 +884,13 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
       const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer)
       const hashHex = Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, '0')).join('')
 
+      // Validar que company_id no sea null
+      if (!accountId) {
+        toast.error('No se pudo identificar tu empresa. Por favor, recarga la página.')
+        setUploading(false)
+        return
+      }
+
       // Validar categoría solo si no es plan Free
       let categoryId = formData.category_id
       if (companyPlan !== 'free') {
@@ -893,9 +900,27 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
           setUploading(false)
           return 
         }
+        
+        // Validar coherencia: categoría pertenece a la company actual
+        const category = categories_list.find(c => c.id === categoryId)
+        if (category && category.company_id !== accountId) {
+          toast.error('La categoría seleccionada no pertenece a tu empresa')
+          setUploading(false)
+          return
+        }
       } else {
         // Plan Free: categoría no requerida
-        categoryId = ''
+        categoryId = null
+      }
+      
+      // Validar coherencia: project_code pertenece a la company actual
+      if (formData.project_code_id && accountId) {
+        const project = projects_list.find(p => p.id === formData.project_code_id)
+        if (project && project.company_id !== accountId) {
+          toast.error('El proyecto seleccionado no pertenece a tu empresa')
+          setUploading(false)
+          return
+        }
       }
 
       const effectiveEmployeeId = formData.employee_id || (selfEmployee?.id as string | undefined) || (user.id as string)
@@ -929,19 +954,33 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         receipt_file_id: receiptFileId,
         source: extractedData ? 'AI_EXTRACTED' : 'MANUAL',
         hash_dedupe: hashHex,
-        status: 'SUBMITTED',
+        status: 'PENDING', // ✅ Valor correcto del enum expense_status
         // NUEVO
         doc_type, // 'ticket' | 'invoice'
         doc_type_source, // 'ai' | 'user'
         classification_path, // 'R1' | 'R2' | 'R3' | 'R4'
-        type: legacyType, // compatibilidad
       }
 
       // Solo agregar project_code_id y category_id si NO es plan Free
       if (companyPlan !== 'free') {
         payload.project_code_id = formData.project_code_id || null
         payload.category_id = categoryId || null
+      } else {
+        // En Free, explícitamente null
+        payload.project_code_id = null
+        payload.category_id = null
       }
+
+      console.log('[ReceiptUpload] 📝 About to INSERT expense:', {
+        company_id: payload.company_id,
+        category_id: payload.category_id,
+        employee_id: payload.employee_id,
+        doc_type: payload.doc_type,
+        status: payload.status,
+        amount_gross: payload.amount_gross,
+        hasReceiptFile: !!payload.receipt_file_id,
+        plan: companyPlan
+      })
 
       if (legacyType === 'FACTURA') {
         const extra = {
