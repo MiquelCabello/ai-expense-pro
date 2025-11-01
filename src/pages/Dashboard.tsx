@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { useAuth } from '@/hooks/useAuth';
+import { useAuthV2 } from '@/hooks/useAuthV2';
 import { supabase } from '@/integrations/supabase/client';
 import AppLayout from '@/components/AppLayout';
 import { 
@@ -39,40 +39,42 @@ const DEFAULT_DASHBOARD_STATS: DashboardStats = {
 };
 
 export default function Dashboard() {
-  const { profile, account, isMaster } = useAuth();
-  const planNameMap: Record<'FREE' | 'PROFESSIONAL' | 'ENTERPRISE', string> = {
-    FREE: 'Starter',
-    PROFESSIONAL: 'Professional',
-    ENTERPRISE: 'Enterprise',
+  const { user, company, membership, isMaster } = useAuthV2();
+  const planNameMap: Record<'free' | 'pro' | 'enterprise', string> = {
+    free: 'Starter',
+    pro: 'Professional',
+    enterprise: 'Enterprise',
   };
-  const planConfig: Record<'FREE' | 'PROFESSIONAL' | 'ENTERPRISE', { monthlyLimit: number | null }> = {
-    FREE: { monthlyLimit: 50 },
-    PROFESSIONAL: { monthlyLimit: null },
-    ENTERPRISE: { monthlyLimit: null },
+  const planConfig: Record<'free' | 'pro' | 'enterprise', { monthlyLimit: number | null }> = {
+    free: { monthlyLimit: 50 },
+    pro: { monthlyLimit: null },
+    enterprise: { monthlyLimit: null },
   };
-  const planKey = (account?.plan ?? 'FREE') as 'FREE' | 'PROFESSIONAL' | 'ENTERPRISE';
-  const resolvedAccountId = !isMaster ? (profile?.account_id ?? account?.id ?? undefined) : undefined;
+  const planKey = (company?.plan ?? 'free') as 'free' | 'pro' | 'enterprise';
+  const resolvedAccountId = !isMaster ? (membership?.company_id ?? company?.id ?? undefined) : undefined;
   const [stats, setStats] = useState<DashboardStats>(DEFAULT_DASHBOARD_STATS);
   const [loading, setLoading] = useState(true);
 
   const planName = isMaster ? 'Master' : planNameMap[planKey];
-  const monthlyLimit = isMaster ? null : account?.monthly_expense_limit ?? planConfig[planKey].monthlyLimit;
+  const monthlyLimit = isMaster ? null : company?.monthly_expense_limit ?? planConfig[planKey].monthlyLimit;
+
+  const isEmployee = membership?.role === 'employee';
 
   const fetchDashboardStats = useCallback(async () => {
-    if (!profile && !isMaster) {
+    if (!user && !isMaster) {
       setStats(DEFAULT_DASHBOARD_STATS);
       setLoading(false);
       return;
     }
 
     if (!isMaster) {
-      if (!profile) {
+      if (!user) {
         setStats(DEFAULT_DASHBOARD_STATS);
         setLoading(false);
         return;
       }
       if (!resolvedAccountId) {
-        console.warn('[Dashboard] Missing account_id for non-master user', profile?.id);
+        console.warn('[Dashboard] Missing company_id for non-master user', user?.id);
         setStats(DEFAULT_DASHBOARD_STATS);
         setLoading(false);
         return;
@@ -90,11 +92,11 @@ export default function Dashboard() {
         `);
 
       if (!isMaster && resolvedAccountId) {
-        expenseQuery = expenseQuery.eq('account_id', resolvedAccountId);
+        expenseQuery = expenseQuery.eq('company_id', resolvedAccountId);
       }
 
-      if (!isMaster && profile?.role === 'EMPLOYEE') {
-        expenseQuery = expenseQuery.eq('employee_id', profile.user_id);
+      if (!isMaster && isEmployee && user) {
+        expenseQuery = expenseQuery.eq('employee_id', user.id);
       }
 
       const { data: expenses, error } = await expenseQuery;
@@ -109,19 +111,19 @@ export default function Dashboard() {
 
       if (employeeIds.length > 0) {
         try {
-          let profileQuery = supabase
-            .from('profiles')
-            .select('user_id, name')
+          const profileQuery = supabase
+            .from('profiles_v2')
+            .select('user_id, email')
             .in('user_id', employeeIds);
 
           if (!isMaster && resolvedAccountId) {
-            profileQuery = profileQuery.eq('account_id', resolvedAccountId);
+            // profiles_v2 doesn't have account_id, skip filtering
           }
 
           const { data: employeeProfiles, error: profilesError } = await profileQuery;
 
           if (!profilesError && employeeProfiles?.length) {
-            profilesMap = Object.fromEntries(employeeProfiles.map((p: any) => [p.user_id, p]));
+            profilesMap = Object.fromEntries(employeeProfiles.map((p: any) => [p.user_id, { user_id: p.user_id, name: p.email }]));
           }
         } catch (profilesErr) {
           console.warn('[Dashboard] Unable to load employee names', profilesErr);
@@ -189,16 +191,16 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, [resolvedAccountId, profile, isMaster]);
+  }, [resolvedAccountId, user, isMaster, isEmployee]);
 
   useEffect(() => {
-    if (!profile && !isMaster) {
+    if (!user && !isMaster) {
       setStats(DEFAULT_DASHBOARD_STATS);
       setLoading(false);
       return;
     }
     void fetchDashboardStats();
-  }, [fetchDashboardStats, profile, isMaster]);
+  }, [fetchDashboardStats, user, isMaster]);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('es-ES', {
@@ -224,17 +226,6 @@ export default function Dashboard() {
       </Badge>
     );
   };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Cargando dashboard...</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <AppLayout>
@@ -346,7 +337,7 @@ export default function Dashboard() {
                         <span>{expense.categories?.name}</span>
                         <span>•</span>
                         <span>{new Date(expense.expense_date).toLocaleDateString('es-ES')}</span>
-                        {profile?.role === 'ADMIN' && (
+                        {!isEmployee && (
                           <>
                             <span>•</span>
                             <span>{expense.profiles?.name}</span>

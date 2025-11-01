@@ -34,8 +34,7 @@ export default function AuthPage() {
           data: {
             name: name,
             company_name: companyName,
-            plan,
-            role: 'ADMIN' // Set default role to ADMIN
+            plan
           }
         }
       });

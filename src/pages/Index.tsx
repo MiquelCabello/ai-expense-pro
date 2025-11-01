@@ -1,9 +1,9 @@
-import { useAuth } from '@/hooks/useAuth';
+import { useAuthV2 } from '@/hooks/useAuthV2';
 import LandingPage from './LandingPage';
 import Dashboard from './Dashboard';
 
 const Index = () => {
-  const { user, loading } = useAuth();
+  const { user, loading } = useAuthV2();
 
   if (loading) {
     return (
