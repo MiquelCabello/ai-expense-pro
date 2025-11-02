@@ -142,8 +142,15 @@ REGLAS CRÍTICAS PARA IDENTIFICACIÓN:
    - "amount_gross": Total FINAL con IVA incluido (Total, Total a pagar)
    - "tax_vat": SOLO la cantidad del IVA/impuesto
    - "amount_net": Base imponible (sin IVA, antes de impuestos)
+
+4. ⚠️ DIRECCIÓN Y EMAIL DEL VENDEDOR:
+   - "address": Busca la dirección física del vendedor/emisor
+   - Suele estar cerca del nombre del vendedor y su CIF/NIF
+   - Ejemplos: "Calle Mayor 123", "Iriarteko borda s/n", "Plaza España, 5"
+   - "email": Busca el email de contacto del vendedor
+   - Puede aparecer al principio o al final de la factura
    
-4. ⚠️ OCR_TEXT - FUNDAMENTAL:
+5. ⚠️ OCR_TEXT - FUNDAMENTAL:
    - Incluye TODO el texto visible, palabra por palabra
    - No resumas, no omitas nada
    - Si ves "Factura" en el documento, DEBE aparecer en ocr_text
@@ -160,14 +167,15 @@ Devuelve JSON válido con estas claves exactas:
   "seller_tax_id": string|null,      // ⚠️ CRÍTICO: CIF/NIF vendedor
   "buyer_tax_id": string|null,       // ⚠️ CRÍTICO: CIF/NIF comprador
   "tax_id": string|null,             // Otro identificador si existe
-  "address": string|null,            // ⚠️ Dirección del vendedor
-  "email": string|null,              // ⚠️ Email de contacto del vendedor
+  "address": string|null,            // ⚠️ IMPORTANTE: Dirección completa del vendedor
+  "email": string|null,              // ⚠️ IMPORTANTE: Email de contacto del vendedor
   "notes": string|null,              // Notas adicionales
   "ocr_text": string|null            // ⚠️ CRÍTICO: TODO el texto visible
 }
 
 ⚠️ NO INVENTES DATOS. Si no ves algo claramente, usa null.
-⚠️ Los campos marcados como CRÍTICOS son especialmente importantes para clasificación.`
+⚠️ Los campos marcados como CRÍTICOS son especialmente importantes para clasificación.
+⚠️ IMPORTANTE: Extrae SIEMPRE la dirección y email del vendedor si aparecen en el documento.`
 }
 
 function buildTicketExtractPrompt() {
