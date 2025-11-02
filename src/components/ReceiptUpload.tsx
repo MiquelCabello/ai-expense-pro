@@ -982,15 +982,8 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         plan: companyPlan
       })
 
-      if (legacyType === 'FACTURA') {
-        const extra = {
-          invoice_number: formData.invoice_number || extractedData?.invoice_number,
-          company_tax_id: formData.company_tax_id || extractedData?.tax_id || extractedData?.seller_tax_id,
-          company_address: formData.company_address || extractedData?.address,
-          company_email: formData.company_email || extractedData?.email,
-        }
-        for (const [k, v] of Object.entries(extra)) (payload as any)[k] = v ?? null
-      }
+      // NOTE: Los campos de factura (invoice_number, company_tax_id, company_address, company_email)
+      // no se almacenan en la tabla expenses - solo se usan para revisión en el formulario
 
       // Intento 1: con columnas nuevas
       const insertResult = await supabase
