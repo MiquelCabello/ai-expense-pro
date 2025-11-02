@@ -939,6 +939,10 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
       // Seguimos guardando el viejo campo `type` (UI/legacy) para compatibilidad
       const legacyType = doc_type === 'invoice' ? 'FACTURA' : 'TICKET'
 
+      // Auto-aprobar gastos del owner
+      const isOwner = membership?.role === 'owner'
+      const autoApprove = isOwner
+
       const payload: any = {
         user_id: user.id, // satisface RLS (exp_insert_own)
         employee_id: effectiveEmployeeId,
@@ -954,7 +958,7 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         receipt_file_id: receiptFileId,
         source: extractedData ? 'AI_EXTRACTED' : 'MANUAL',
         hash_dedupe: hashHex,
-        status: 'PENDING', // ✅ Valor correcto del enum expense_status
+        status: autoApprove ? 'APPROVED' : 'PENDING', // ✅ Auto-aprobar si es owner
         // NUEVO
         doc_type, // 'ticket' | 'invoice'
         doc_type_source, // 'ai' | 'user'
@@ -1024,7 +1028,7 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         }
       }
 
-      toast.success('Gasto enviado para aprobación')
+      toast.success(autoApprove ? 'Gasto registrado y aprobado automáticamente' : 'Gasto enviado para aprobación')
       if (limitApplies) {
         setMonthlyUsage((current) => {
           if (typeof current === 'number') {

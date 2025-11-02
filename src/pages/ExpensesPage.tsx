@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useAuthV2 } from '@/hooks/useAuthV2';
 import { supabase } from '@/integrations/supabase/client';
 import AppLayout from '@/components/AppLayout';
@@ -16,7 +17,11 @@ import {
   CheckCircle,
   AlertTriangle,
   Euro,
-  Calendar
+  Calendar,
+  Eye,
+  Check,
+  X,
+  ExternalLink
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -31,9 +36,12 @@ interface Expense {
   payment_method: string;
   currency: string;
   notes?: string;
+  receipt_file_id?: string;
+  employee_id: string;
   categories: { name: string } | null;
   profiles?: { name: string } | null;
   created_at: string;
+  doc_type?: string;
 }
 
 export default function ExpensesPage() {
@@ -49,6 +57,11 @@ export default function ExpensesPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null);
+  const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
+
+  const canManageExpenses = isMaster || membership?.role === 'owner' || membership?.role === 'company_admin' || membership?.role === 'department_admin';
 
   const fetchExpenses = useCallback(async () => {
     if (!isMaster && !resolvedAccountId) {
@@ -162,6 +175,86 @@ export default function ExpensesPage() {
     
     return matchesSearch && matchesStatus;
   });
+
+  const handleViewExpense = async (expense: Expense) => {
+    setSelectedExpense(expense);
+    
+    // Obtener URL del recibo si existe
+    if (expense.receipt_file_id) {
+      try {
+        const { data: fileData } = await supabase
+          .from('files')
+          .select('storage_key')
+          .eq('id', expense.receipt_file_id)
+          .single();
+        
+        if (fileData?.storage_key) {
+          const { data } = supabase.storage
+            .from('receipts')
+            .getPublicUrl(fileData.storage_key);
+          
+          setReceiptUrl(data.publicUrl);
+        }
+      } catch (error) {
+        console.error('[ExpensesPage] Error getting receipt URL:', error);
+      }
+    }
+  };
+
+  const handleApproveExpense = async () => {
+    if (!selectedExpense) return;
+    
+    try {
+      setActionLoading(true);
+      const { error } = await supabase
+        .from('expenses')
+        .update({ 
+          status: 'APPROVED',
+          approved_at: new Date().toISOString(),
+          approver_id: user?.id
+        })
+        .eq('id', selectedExpense.id);
+      
+      if (error) throw error;
+      
+      toast.success('Gasto aprobado correctamente');
+      setSelectedExpense(null);
+      setReceiptUrl(null);
+      fetchExpenses();
+    } catch (error) {
+      console.error('[ExpensesPage] Error approving expense:', error);
+      toast.error('Error al aprobar el gasto');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRejectExpense = async () => {
+    if (!selectedExpense) return;
+    
+    try {
+      setActionLoading(true);
+      const { error } = await supabase
+        .from('expenses')
+        .update({ 
+          status: 'REJECTED',
+          approver_id: user?.id
+        })
+        .eq('id', selectedExpense.id);
+      
+      if (error) throw error;
+      
+      toast.success('Gasto rechazado');
+      setSelectedExpense(null);
+      setReceiptUrl(null);
+      fetchExpenses();
+    } catch (error) {
+      console.error('[ExpensesPage] Error rejecting expense:', error);
+      toast.error('Error al rechazar el gasto');
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   const monthlyLimit = isMaster ? null : company?.monthly_expense_limit ?? planMonthlyLimitMap[planKey];
   const currentMonthUsage = expenses.filter(expense => {
@@ -304,6 +397,40 @@ export default function ExpensesPage() {
                       <div className="text-xs text-muted-foreground">
                         IVA: {formatCurrency(expense.tax_vat || 0)}
                       </div>
+                      <div className="flex gap-2 mt-3">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleViewExpense(expense)}
+                          className="gap-1"
+                        >
+                          <Eye className="h-3 w-3" />
+                          Ver
+                        </Button>
+                        {canManageExpenses && expense.status === 'PENDING' && expense.employee_id !== user?.id && (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="default"
+                              onClick={() => handleViewExpense(expense)}
+                              className="gap-1 bg-green-600 hover:bg-green-700"
+                            >
+                              <Check className="h-3 w-3" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={async () => {
+                                setSelectedExpense(expense);
+                                await handleRejectExpense();
+                              }}
+                              className="gap-1"
+                            >
+                              <X className="h-3 w-3" />
+                            </Button>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -326,6 +453,160 @@ export default function ExpensesPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Diálogo de detalles del gasto */}
+        <Dialog open={!!selectedExpense} onOpenChange={() => {
+          setSelectedExpense(null);
+          setReceiptUrl(null);
+        }}>
+          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                Detalles del Gasto
+              </DialogTitle>
+              <DialogDescription>
+                Información completa y documento adjunto
+              </DialogDescription>
+            </DialogHeader>
+
+            {selectedExpense && (
+              <div className="space-y-4">
+                {/* Estado */}
+                <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
+                  <span className="font-medium">Estado</span>
+                  {getStatusBadge(selectedExpense.status)}
+                </div>
+
+                {/* Información del gasto */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Proveedor</label>
+                    <p className="text-lg font-semibold">{selectedExpense.vendor}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Tipo</label>
+                    <p className="text-lg">{selectedExpense.doc_type === 'invoice' ? '🧾 Factura' : '🎫 Ticket'}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Fecha</label>
+                    <p className="flex items-center gap-1">
+                      <Calendar className="h-4 w-4" />
+                      {new Date(selectedExpense.expense_date).toLocaleDateString('es-ES')}
+                    </p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Categoría</label>
+                    <p>{selectedExpense.categories?.name || 'Sin categoría'}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Método de pago</label>
+                    <p>💳 {selectedExpense.payment_method}</p>
+                  </div>
+                  {selectedExpense.profiles && (
+                    <div>
+                      <label className="text-sm font-medium text-muted-foreground">Empleado</label>
+                      <p>👤 {selectedExpense.profiles.name}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Importes */}
+                <div className="p-4 bg-muted/50 rounded-lg space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Base imponible</span>
+                    <span className="font-medium">{formatCurrency(selectedExpense.amount_net)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">IVA</span>
+                    <span className="font-medium">{formatCurrency(selectedExpense.tax_vat || 0)}</span>
+                  </div>
+                  <div className="flex justify-between text-lg font-bold border-t pt-2">
+                    <span>Total</span>
+                    <span className="flex items-center gap-1">
+                      <Euro className="h-5 w-5" />
+                      {formatCurrency(selectedExpense.amount_gross)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Notas */}
+                {selectedExpense.notes && (
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Notas</label>
+                    <p className="p-3 bg-muted/50 rounded-lg italic">"{selectedExpense.notes}"</p>
+                  </div>
+                )}
+
+                {/* Documento adjunto */}
+                {receiptUrl && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-sm font-medium text-muted-foreground">Documento adjunto</label>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => window.open(receiptUrl, '_blank')}
+                        className="gap-1"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        Abrir en nueva pestaña
+                      </Button>
+                    </div>
+                    <div className="border rounded-lg overflow-hidden bg-muted/20">
+                      <img 
+                        src={receiptUrl} 
+                        alt="Documento del gasto" 
+                        className="w-full h-auto max-h-96 object-contain"
+                        onError={(e) => {
+                          // Si falla la carga, mostrar un placeholder
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = 'none';
+                          const parent = target.parentElement;
+                          if (parent) {
+                            parent.innerHTML = '<div class="flex flex-col items-center justify-center p-12 text-muted-foreground"><FileText class="h-16 w-16 mb-2" /><p>No se pudo cargar la vista previa</p></div>';
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {canManageExpenses && selectedExpense?.status === 'PENDING' && selectedExpense.employee_id !== user?.id && (
+              <DialogFooter className="gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setSelectedExpense(null);
+                    setReceiptUrl(null);
+                  }}
+                  disabled={actionLoading}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={handleRejectExpense}
+                  disabled={actionLoading}
+                  className="gap-1"
+                >
+                  <X className="h-4 w-4" />
+                  Rechazar
+                </Button>
+                <Button
+                  onClick={handleApproveExpense}
+                  disabled={actionLoading}
+                  className="gap-1 bg-green-600 hover:bg-green-700"
+                >
+                  <Check className="h-4 w-4" />
+                  Aprobar Gasto
+                </Button>
+              </DialogFooter>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     </AppLayout>
   );
