@@ -160,7 +160,8 @@ Devuelve JSON válido con estas claves exactas:
   "seller_tax_id": string|null,      // ⚠️ CRÍTICO: CIF/NIF vendedor
   "buyer_tax_id": string|null,       // ⚠️ CRÍTICO: CIF/NIF comprador
   "tax_id": string|null,             // Otro identificador si existe
-  "email": string|null,              // Email de contacto
+  "address": string|null,            // ⚠️ Dirección del vendedor
+  "email": string|null,              // ⚠️ Email de contacto del vendedor
   "notes": string|null,              // Notas adicionales
   "ocr_text": string|null            // ⚠️ CRÍTICO: TODO el texto visible
 }
