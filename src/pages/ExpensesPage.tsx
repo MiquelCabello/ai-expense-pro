@@ -5,6 +5,8 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { useAuthV2 } from '@/hooks/useAuthV2';
 import { supabase } from '@/integrations/supabase/client';
 import AppLayout from '@/components/AppLayout';
@@ -21,7 +23,8 @@ import {
   Eye,
   Check,
   X,
-  ExternalLink
+  ExternalLink,
+  Trash2
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -60,6 +63,8 @@ export default function ExpensesPage() {
   const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null);
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteReason, setDeleteReason] = useState("");
 
   const canManageExpenses = isMaster || membership?.role === 'owner' || membership?.role === 'company_admin' || membership?.role === 'department_admin';
 
@@ -256,6 +261,56 @@ export default function ExpensesPage() {
     }
   };
 
+  const handleDeleteExpense = async (expense: Expense) => {
+    setSelectedExpense(expense);
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDeleteExpense = async () => {
+    if (!selectedExpense || !membership?.company_id) return;
+
+    setActionLoading(true);
+    const isOwnerOrCompanyAdmin = membership.role === "owner" || membership.role === "company_admin";
+
+    if (isOwnerOrCompanyAdmin) {
+      // Eliminación directa
+      const { error } = await supabase
+        .from("expenses")
+        .delete()
+        .eq("id", selectedExpense.id);
+
+      if (error) {
+        console.error('[ExpensesPage] Error deleting expense:', error);
+        toast.error("Error al eliminar el gasto");
+      } else {
+        toast.success("Gasto eliminado correctamente");
+        fetchExpenses();
+      }
+    } else {
+      // Crear solicitud de eliminación para department_admin
+      const { error } = await supabase
+        .from("expense_deletion_requests")
+        .insert({
+          expense_id: selectedExpense.id,
+          company_id: membership.company_id,
+          requested_by: user?.id,
+          reason: deleteReason
+        });
+
+      if (error) {
+        console.error('[ExpensesPage] Error creating deletion request:', error);
+        toast.error("Error al crear la solicitud de eliminación");
+      } else {
+        toast.success("Solicitud de eliminación enviada para aprobación");
+      }
+    }
+
+    setActionLoading(false);
+    setDeleteDialogOpen(false);
+    setDeleteReason("");
+    setSelectedExpense(null);
+  };
+
   const monthlyLimit = isMaster ? null : company?.monthly_expense_limit ?? planMonthlyLimitMap[planKey];
   const currentMonthUsage = expenses.filter(expense => {
     const date = new Date(expense.expense_date);
@@ -429,6 +484,17 @@ export default function ExpensesPage() {
                               <X className="h-3 w-3" />
                             </Button>
                           </>
+                        )}
+                        {canManageExpenses && (
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => handleDeleteExpense(expense)}
+                            disabled={actionLoading}
+                            className="gap-1"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
                         )}
                       </div>
                     </div>
@@ -605,6 +671,73 @@ export default function ExpensesPage() {
                 </Button>
               </DialogFooter>
             )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Dialog de confirmación de eliminación */}
+        <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-destructive" />
+                {membership?.role === "owner" || membership?.role === "company_admin" 
+                  ? "Confirmar eliminación"
+                  : "Solicitar eliminación"}
+              </DialogTitle>
+              <DialogDescription>
+                {membership?.role === "owner" || membership?.role === "company_admin"
+                  ? "Esta acción eliminará el gasto permanentemente y no se puede deshacer."
+                  : "Esta solicitud será enviada al administrador para su aprobación."}
+              </DialogDescription>
+            </DialogHeader>
+            
+            {selectedExpense && (
+              <div className="space-y-4">
+                <div className="p-4 bg-muted rounded-lg">
+                  <p className="text-sm font-medium">{selectedExpense.vendor}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {formatCurrency(selectedExpense.amount_gross)}
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="delete-reason">
+                    {membership?.role === "department_admin" ? "Motivo de la solicitud *" : "Motivo (opcional)"}
+                  </Label>
+                  <Textarea
+                    id="delete-reason"
+                    placeholder="Explica por qué se debe eliminar este gasto..."
+                    value={deleteReason}
+                    onChange={(e) => setDeleteReason(e.target.value)}
+                    rows={3}
+                  />
+                </div>
+              </div>
+            )}
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setDeleteDialogOpen(false);
+                  setDeleteReason("");
+                  setSelectedExpense(null);
+                }}
+                disabled={actionLoading}
+              >
+                Cancelar
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={confirmDeleteExpense}
+                disabled={actionLoading || (membership?.role === "department_admin" && !deleteReason.trim())}
+              >
+                {actionLoading ? "Procesando..." : 
+                  membership?.role === "owner" || membership?.role === "company_admin" 
+                    ? "Eliminar gasto" 
+                    : "Enviar solicitud"}
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
