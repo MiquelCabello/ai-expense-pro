@@ -923,7 +923,8 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         }
       }
 
-      const effectiveEmployeeId = formData.employee_id || (selfEmployee?.id as string | undefined) || (user.id as string)
+      // CRÍTICO: employee_id debe ser el user_id del usuario actual para pasar RLS
+      const effectiveEmployeeId = user.id
 
       // NUEVO: decidir doc_type final respetando la elección del usuario
       const userChoiceLower: DocTypeAI | undefined = docType ? (docType === 'FACTURA' ? 'invoice' : 'ticket') : undefined
@@ -944,7 +945,6 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
       const autoApprove = isOwner
 
       const payload: any = {
-        user_id: user.id, // satisface RLS (exp_insert_own)
         employee_id: effectiveEmployeeId,
         vendor: formData.vendor,
         expense_date: formData.expense_date,
@@ -1011,7 +1011,21 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         expenseId = r2.data?.id ?? expenseId
       }
 
-      if (expenseError) throw expenseError
+      if (expenseError) {
+        console.error('[ReceiptUpload] ❌ Error al insertar gasto:', {
+          error: expenseError,
+          code: expenseError.code,
+          message: expenseError.message,
+          details: expenseError.details,
+          hint: expenseError.hint,
+          payload: {
+            employee_id: payload.employee_id,
+            company_id: payload.company_id,
+            user_id: user.id
+          }
+        })
+        throw expenseError
+      }
 
       if (expenseId) {
         const auditPayload: TablesInsert<'audit_logs'> = {
@@ -1042,7 +1056,10 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         })
       }
       onUploadComplete?.()
-    } catch (err: any) { toast.error('No se pudo crear el gasto', { description: err?.message }) }
+    } catch (err: any) { 
+      console.error('[ReceiptUpload] ❌ Error en handleFormSubmit:', err)
+      toast.error('No se pudo crear el gasto', { description: err?.message || 'Error desconocido' })
+    }
     finally { setUploading(false) }
   }
 
