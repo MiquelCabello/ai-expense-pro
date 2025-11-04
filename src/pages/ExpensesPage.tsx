@@ -187,21 +187,37 @@ export default function ExpensesPage() {
     // Obtener URL del recibo si existe
     if (expense.receipt_file_id) {
       try {
+        // Intentar obtener storage_key desde la tabla files
         const { data: fileData } = await supabase
           .from('files')
           .select('storage_key')
           .eq('id', expense.receipt_file_id)
           .single();
         
-        if (fileData?.storage_key) {
-          const { data } = supabase.storage
-            .from('receipts')
-            .getPublicUrl(fileData.storage_key);
-          
-          setReceiptUrl(data.publicUrl);
+        let storageKey = fileData?.storage_key;
+        
+        // Si no existe en la tabla files, usar el receipt_file_id directamente como storage_key
+        if (!storageKey) {
+          storageKey = expense.receipt_file_id;
         }
+        
+        // Obtener la URL pública del archivo
+        const { data } = supabase.storage
+          .from('receipts')
+          .getPublicUrl(storageKey);
+        
+        setReceiptUrl(data.publicUrl);
       } catch (error) {
         console.error('[ExpensesPage] Error getting receipt URL:', error);
+        // En caso de error, intentar usar el receipt_file_id directamente
+        try {
+          const { data } = supabase.storage
+            .from('receipts')
+            .getPublicUrl(expense.receipt_file_id);
+          setReceiptUrl(data.publicUrl);
+        } catch (fallbackError) {
+          console.error('[ExpensesPage] Fallback error:', fallbackError);
+        }
       }
     }
   };
