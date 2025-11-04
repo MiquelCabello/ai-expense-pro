@@ -74,10 +74,27 @@ export default function AnalyticsPage() {
         .gte('expense_date', toLocalISODate(startDate))
         .lte('expense_date', toLocalISODate(endDate))
 
-      // NOTE: empleados solo ven sus gastos
+      // NOTE: filtrar según rol
       if (membership?.role === 'employee') {
+        // Empleados solo ven sus propios gastos
         query = query.eq('employee_id', user?.id)
+      } else if (membership?.role === 'department_admin' && membership?.department_id) {
+        // Admins de departamento ven gastos de su departamento
+        const { data: deptMembers } = await supabase
+          .from('memberships')
+          .select('user_id')
+          .eq('company_id', companyId)
+          .eq('department_id', membership.department_id)
+        
+        if (deptMembers && deptMembers.length > 0) {
+          const deptUserIds = deptMembers.map(m => m.user_id)
+          query = query.in('employee_id', deptUserIds)
+        } else {
+          // Si no hay miembros, no mostrar nada
+          query = query.eq('employee_id', '00000000-0000-0000-0000-000000000000')
+        }
       }
+      // Owner y company_admin ven todos los gastos (sin filtro adicional)
 
       // NOTE: por defecto solo aprobados; se puede ampliar a ALL
       if (statusFilter !== 'ALL') {
