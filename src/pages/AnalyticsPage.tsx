@@ -65,6 +65,9 @@ export default function AnalyticsPage() {
         case 'last_year':
           startDate.setFullYear(startDate.getFullYear() - 1)
           break
+        case 'all':
+          startDate.setFullYear(2000) // Fecha muy antigua para incluir todos los gastos
+          break
       }
 
       let query = supabase
@@ -174,6 +177,7 @@ export default function AnalyticsPage() {
                 <SelectItem value="last_3_months">Últimos 3 meses</SelectItem>
                 <SelectItem value="last_6_months">Últimos 6 meses</SelectItem>
                 <SelectItem value="last_year">Último año</SelectItem>
+                <SelectItem value="all">Todos los gastos</SelectItem>
               </SelectContent>
             </Select>
 
