@@ -45,6 +45,8 @@ interface Expense {
   profiles?: { name: string } | null;
   created_at: string;
   doc_type?: string;
+  dropbox_path?: string;
+  dropbox_url?: string;
 }
 
 export default function ExpensesPage() {
@@ -621,54 +623,81 @@ export default function ExpensesPage() {
                 )}
 
                 {/* Documento adjunto */}
-                {receiptUrl && (
+                {(receiptUrl || selectedExpense?.dropbox_url) && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <label className="text-sm font-medium text-muted-foreground">Documento adjunto</label>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            const link = document.createElement('a');
-                            link.href = receiptUrl;
-                            link.download = `recibo-${selectedExpense?.vendor || 'documento'}.jpg`;
-                            document.body.appendChild(link);
-                            link.click();
-                            document.body.removeChild(link);
-                          }}
-                          className="gap-1"
-                        >
-                          <Download className="h-3 w-3" />
-                          Descargar
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => window.open(receiptUrl, '_blank')}
-                          className="gap-1"
-                        >
-                          <ExternalLink className="h-3 w-3" />
-                          Abrir en nueva pestaña
-                        </Button>
+                      <div className="flex gap-2 flex-wrap">
+                        {receiptUrl && (
+                          <>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                const link = document.createElement('a');
+                                link.href = receiptUrl;
+                                link.download = `recibo-${selectedExpense?.vendor || 'documento'}.jpg`;
+                                document.body.appendChild(link);
+                                link.click();
+                                document.body.removeChild(link);
+                              }}
+                              className="gap-1"
+                            >
+                              <Download className="h-3 w-3" />
+                              Descargar
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => window.open(receiptUrl, '_blank')}
+                              className="gap-1"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                              Abrir en nueva pestaña
+                            </Button>
+                          </>
+                        )}
+                        {selectedExpense?.dropbox_url && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => window.open(selectedExpense.dropbox_url || '', '_blank')}
+                            className="gap-1 bg-[#0061FF] hover:bg-[#0061FF]/90 text-white border-[#0061FF]"
+                          >
+                            <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor">
+                              <path d="M6 1.807L0 5.629l6 3.822 6.001-3.822L6 1.807zM18 1.807l-6 3.822 6 3.822 6-3.822-6-3.822zM0 13.274l6 3.822 6.001-3.822L6 9.452l-6 3.822zM18 9.452l-6 3.822 6 3.822 6-3.822-6-3.822zM6 18.371l6.001 3.822 6-3.822-6-3.822L6 18.371z"/>
+                            </svg>
+                            Ver en Dropbox
+                          </Button>
+                        )}
                       </div>
                     </div>
-                    <div className="border rounded-lg overflow-hidden bg-muted/20">
-                      <img 
-                        src={receiptUrl} 
-                        alt="Documento del gasto" 
-                        className="w-full h-auto max-h-96 object-contain"
-                        onError={(e) => {
-                          // Si falla la carga, mostrar un placeholder
-                          const target = e.target as HTMLImageElement;
-                          target.style.display = 'none';
-                          const parent = target.parentElement;
-                          if (parent) {
-                            parent.innerHTML = '<div class="flex flex-col items-center justify-center p-12 text-muted-foreground"><FileText class="h-16 w-16 mb-2" /><p>No se pudo cargar la vista previa</p></div>';
-                          }
-                        }}
-                      />
-                    </div>
+                    {selectedExpense?.dropbox_path && (
+                      <div className="text-xs text-muted-foreground flex items-center gap-1">
+                        <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M6 1.807L0 5.629l6 3.822 6.001-3.822L6 1.807zM18 1.807l-6 3.822 6 3.822 6-3.822-6-3.822zM0 13.274l6 3.822 6.001-3.822L6 9.452l-6 3.822zM18 9.452l-6 3.822 6 3.822 6-3.822-6-3.822zM6 18.371l6.001 3.822 6-3.822-6-3.822L6 18.371z"/>
+                        </svg>
+                        <span>{selectedExpense.dropbox_path}</span>
+                      </div>
+                    )}
+                    {receiptUrl && (
+                      <div className="border rounded-lg overflow-hidden bg-muted/20">
+                        <img 
+                          src={receiptUrl} 
+                          alt="Documento del gasto" 
+                          className="w-full h-auto max-h-96 object-contain"
+                          onError={(e) => {
+                            // Si falla la carga, mostrar un placeholder
+                            const target = e.target as HTMLImageElement;
+                            target.style.display = 'none';
+                            const parent = target.parentElement;
+                            if (parent) {
+                              parent.innerHTML = '<div class="flex flex-col items-center justify-center p-12 text-muted-foreground"><FileText class="h-16 w-16 mb-2" /><p>No se pudo cargar la vista previa</p></div>';
+                            }
+                          }}
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

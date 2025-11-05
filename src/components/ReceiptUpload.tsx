@@ -1040,6 +1040,53 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         if (auditError) {
           console.warn('[ReceiptUpload] Failed to write audit log', auditError)
         }
+
+        // Subir archivo a Dropbox en segundo plano
+        if (receiptFileId) {
+          try {
+            // Obtener URL pública del archivo
+            const { data: fileData } = await supabase
+              .from('receipt_files')
+              .select('path')
+              .eq('id', receiptFileId)
+              .single()
+
+            if (fileData?.path) {
+              const { data: urlData } = supabase.storage
+                .from('receipts')
+                .getPublicUrl(fileData.path)
+
+              // Llamar a la edge function para subir a Dropbox
+              const dropboxResponse = await supabase.functions.invoke('upload-to-dropbox', {
+                body: {
+                  file_url: urlData.publicUrl,
+                  file_name: file.name,
+                  company_id: accountId,
+                  user_id: user.id,
+                  department_id: membership?.department_id,
+                }
+              })
+
+              if (dropboxResponse.data && !dropboxResponse.error) {
+                // Actualizar el expense con la información de Dropbox
+                await supabase
+                  .from('expenses')
+                  .update({
+                    dropbox_path: dropboxResponse.data.dropbox_path,
+                    dropbox_url: dropboxResponse.data.dropbox_url,
+                  })
+                  .eq('id', expenseId)
+
+                console.log('[ReceiptUpload] Archivo subido a Dropbox:', dropboxResponse.data.dropbox_path)
+              } else {
+                console.warn('[ReceiptUpload] Error subiendo a Dropbox:', dropboxResponse.error)
+              }
+            }
+          } catch (dropboxError) {
+            console.warn('[ReceiptUpload] Error en proceso de Dropbox:', dropboxError)
+            // No mostramos error al usuario para no interrumpir el flujo
+          }
+        }
       }
 
       toast.success(autoApprove ? 'Gasto registrado y aprobado automáticamente' : 'Gasto enviado para aprobación')

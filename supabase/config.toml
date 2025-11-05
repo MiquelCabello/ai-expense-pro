@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.ai-extract-expense]
 verify_jwt = false
+
+[functions.upload-to-dropbox]
+verify_jwt = true

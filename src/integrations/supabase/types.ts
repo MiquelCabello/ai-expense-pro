@@ -380,6 +380,8 @@ export type Database = {
           doc_type_source:
             | Database["public"]["Enums"]["classification_source"]
             | null
+          dropbox_path: string | null
+          dropbox_url: string | null
           employee_id: string
           expense_date: string
           hash_dedupe: string
@@ -411,6 +413,8 @@ export type Database = {
           doc_type_source?:
             | Database["public"]["Enums"]["classification_source"]
             | null
+          dropbox_path?: string | null
+          dropbox_url?: string | null
           employee_id: string
           expense_date: string
           hash_dedupe: string
@@ -442,6 +446,8 @@ export type Database = {
           doc_type_source?:
             | Database["public"]["Enums"]["classification_source"]
             | null
+          dropbox_path?: string | null
+          dropbox_url?: string | null
           employee_id?: string
           expense_date?: string
           hash_dedupe?: string
