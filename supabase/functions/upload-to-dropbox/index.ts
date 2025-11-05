@@ -26,8 +26,11 @@ Deno.serve(async (req) => {
   }
 
   try {
+    console.log('[upload-to-dropbox] Function invoked')
+    
     const DROPBOX_ACCESS_TOKEN = Deno.env.get('DROPBOX_ACCESS_TOKEN')
     if (!DROPBOX_ACCESS_TOKEN) {
+      console.error('[upload-to-dropbox] DROPBOX_ACCESS_TOKEN not configured')
       throw new Error('DROPBOX_ACCESS_TOKEN not configured')
     }
 
@@ -40,7 +43,13 @@ Deno.serve(async (req) => {
     const body: UploadRequest = await req.json()
     const { file_url, file_name, company_id, user_id, department_id } = body
 
-    console.log('[upload-to-dropbox] Processing upload:', { company_id, user_id, department_id })
+    console.log('[upload-to-dropbox] Processing upload:', { 
+      company_id, 
+      user_id, 
+      department_id,
+      file_name,
+      file_url: file_url.substring(0, 50) + '...'
+    })
 
     // 1. Obtener información de la empresa
     const { data: company, error: companyError } = await supabase

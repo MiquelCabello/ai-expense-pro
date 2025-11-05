@@ -1044,17 +1044,26 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         // Subir archivo a Dropbox en segundo plano
         if (receiptFileId) {
           try {
+            console.log('[ReceiptUpload] Iniciando subida a Dropbox...', { receiptFileId, expenseId })
+            
             // Obtener URL pública del archivo
-            const { data: fileData } = await supabase
+            const { data: fileData, error: fileError } = await supabase
               .from('receipt_files')
               .select('path')
               .eq('id', receiptFileId)
               .single()
 
+            if (fileError) {
+              console.error('[ReceiptUpload] Error obteniendo info del archivo:', fileError)
+              throw fileError
+            }
+
             if (fileData?.path) {
               const { data: urlData } = supabase.storage
                 .from('receipts')
                 .getPublicUrl(fileData.path)
+
+              console.log('[ReceiptUpload] URL del archivo obtenida:', urlData.publicUrl)
 
               // Llamar a la edge function para subir a Dropbox
               const dropboxResponse = await supabase.functions.invoke('upload-to-dropbox', {
@@ -1062,14 +1071,16 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
                   file_url: urlData.publicUrl,
                   file_name: file.name,
                   company_id: accountId,
-                  user_id: user.id,
+                  user_id: effectiveEmployeeId,
                   department_id: membership?.department_id,
                 }
               })
 
+              console.log('[ReceiptUpload] Respuesta de Dropbox:', dropboxResponse)
+
               if (dropboxResponse.data && !dropboxResponse.error) {
                 // Actualizar el expense con la información de Dropbox
-                await supabase
+                const { error: updateError } = await supabase
                   .from('expenses')
                   .update({
                     dropbox_path: dropboxResponse.data.dropbox_path,
@@ -1077,13 +1088,19 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
                   })
                   .eq('id', expenseId)
 
-                console.log('[ReceiptUpload] Archivo subido a Dropbox:', dropboxResponse.data.dropbox_path)
+                if (updateError) {
+                  console.error('[ReceiptUpload] Error actualizando gasto con info de Dropbox:', updateError)
+                } else {
+                  console.log('[ReceiptUpload] ✅ Archivo subido a Dropbox:', dropboxResponse.data.dropbox_path)
+                }
               } else {
-                console.warn('[ReceiptUpload] Error subiendo a Dropbox:', dropboxResponse.error)
+                console.error('[ReceiptUpload] Error en respuesta de Dropbox:', dropboxResponse.error)
               }
+            } else {
+              console.warn('[ReceiptUpload] No se encontró path del archivo')
             }
           } catch (dropboxError) {
-            console.warn('[ReceiptUpload] Error en proceso de Dropbox:', dropboxError)
+            console.error('[ReceiptUpload] Error en proceso de Dropbox:', dropboxError)
             // No mostramos error al usuario para no interrumpir el flujo
           }
         }
