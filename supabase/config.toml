@@ -13,4 +13,7 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.upload-to-dropbox]
-verify_jwt = true
+verify_jwt = false
+
+[functions.delete-from-dropbox]
+verify_jwt = false

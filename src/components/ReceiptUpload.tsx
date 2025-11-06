@@ -1041,68 +1041,104 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
           console.warn('[ReceiptUpload] Failed to write audit log', auditError)
         }
 
-        // Subir archivo a Dropbox en segundo plano
-        if (receiptFileId) {
+        // Subir archivo a Dropbox después de que el gasto esté en la BD
+        console.log('[ReceiptUpload] 📤 Intentando subir a Dropbox...', {
+          receiptFileId,
+          expenseId,
+          accountId,
+          effectiveEmployeeId,
+          department_id: membership?.department_id
+        })
+        
+        if (receiptFileId && expenseId) {
           try {
-            console.log('[ReceiptUpload] Iniciando subida a Dropbox...', { receiptFileId, expenseId })
-            
-            // Obtener URL pública del archivo
+            // Obtener info del archivo desde receipt_files
             const { data: fileData, error: fileError } = await supabase
               .from('receipt_files')
-              .select('path')
+              .select('path, original_name')
               .eq('id', receiptFileId)
               .single()
 
             if (fileError) {
-              console.error('[ReceiptUpload] Error obteniendo info del archivo:', fileError)
+              console.error('[ReceiptUpload] ❌ Error obteniendo info del archivo:', fileError)
               throw fileError
             }
 
-            if (fileData?.path) {
-              const { data: urlData } = supabase.storage
-                .from('receipts')
-                .getPublicUrl(fileData.path)
-
-              console.log('[ReceiptUpload] URL del archivo obtenida:', urlData.publicUrl)
-
-              // Llamar a la edge function para subir a Dropbox
-              const dropboxResponse = await supabase.functions.invoke('upload-to-dropbox', {
-                body: {
-                  file_url: urlData.publicUrl,
-                  file_name: file.name,
-                  company_id: accountId,
-                  user_id: effectiveEmployeeId,
-                  department_id: membership?.department_id,
-                }
-              })
-
-              console.log('[ReceiptUpload] Respuesta de Dropbox:', dropboxResponse)
-
-              if (dropboxResponse.data && !dropboxResponse.error) {
-                // Actualizar el expense con la información de Dropbox
-                const { error: updateError } = await supabase
-                  .from('expenses')
-                  .update({
-                    dropbox_path: dropboxResponse.data.dropbox_path,
-                    dropbox_url: dropboxResponse.data.dropbox_url,
-                  })
-                  .eq('id', expenseId)
-
-                if (updateError) {
-                  console.error('[ReceiptUpload] Error actualizando gasto con info de Dropbox:', updateError)
-                } else {
-                  console.log('[ReceiptUpload] ✅ Archivo subido a Dropbox:', dropboxResponse.data.dropbox_path)
-                }
-              } else {
-                console.error('[ReceiptUpload] Error en respuesta de Dropbox:', dropboxResponse.error)
-              }
-            } else {
-              console.warn('[ReceiptUpload] No se encontró path del archivo')
+            if (!fileData?.path) {
+              console.warn('[ReceiptUpload] ⚠️ No se encontró path del archivo')
+              return
             }
-          } catch (dropboxError) {
-            console.error('[ReceiptUpload] Error en proceso de Dropbox:', dropboxError)
-            // No mostramos error al usuario para no interrumpir el flujo
+
+            console.log('[ReceiptUpload] 📁 Archivo encontrado:', {
+              path: fileData.path,
+              originalName: fileData.original_name
+            })
+
+            // Obtener URL pública del archivo
+            const { data: urlData } = supabase.storage
+              .from('receipts')
+              .getPublicUrl(fileData.path)
+
+            console.log('[ReceiptUpload] 🔗 URL pública obtenida:', urlData.publicUrl)
+
+            // Llamar a la edge function para subir a Dropbox
+            console.log('[ReceiptUpload] 🚀 Invocando edge function upload-to-dropbox...')
+            const dropboxResponse = await supabase.functions.invoke('upload-to-dropbox', {
+              body: {
+                file_url: urlData.publicUrl,
+                file_name: fileData.original_name || file.name,
+                company_id: accountId,
+                user_id: effectiveEmployeeId,
+                department_id: membership?.department_id,
+              }
+            })
+
+            console.log('[ReceiptUpload] 📦 Respuesta de Dropbox:', {
+              data: dropboxResponse.data,
+              error: dropboxResponse.error,
+              status: dropboxResponse.error ? 'ERROR' : 'SUCCESS'
+            })
+
+            if (dropboxResponse.error) {
+              console.error('[ReceiptUpload] ❌ Error en respuesta de Dropbox:', dropboxResponse.error)
+              toast.error('Error al subir a Dropbox', {
+                description: dropboxResponse.error.message || 'Error desconocido'
+              })
+              return
+            }
+
+            if (dropboxResponse.data?.dropbox_path) {
+              // Actualizar el expense con la información de Dropbox
+              const { error: updateError } = await supabase
+                .from('expenses')
+                .update({
+                  dropbox_path: dropboxResponse.data.dropbox_path,
+                  dropbox_url: dropboxResponse.data.dropbox_url,
+                })
+                .eq('id', expenseId)
+
+              if (updateError) {
+                console.error('[ReceiptUpload] ❌ Error actualizando gasto con info de Dropbox:', updateError)
+                toast.error('Error al actualizar con info de Dropbox')
+              } else {
+                console.log('[ReceiptUpload] ✅ Archivo subido a Dropbox:', dropboxResponse.data.dropbox_path)
+                toast.success('Archivo subido a Dropbox', {
+                  description: dropboxResponse.data.dropbox_path
+                })
+              }
+            }
+          } catch (dropboxError: any) {
+            console.error('[ReceiptUpload] ❌ Error en proceso de Dropbox:', dropboxError)
+            toast.error('Error al subir a Dropbox', {
+              description: dropboxError?.message || 'Error desconocido'
+            })
+            // No fallar el proceso principal si falla Dropbox
           }
+        } else {
+          console.warn('[ReceiptUpload] ⚠️ No se puede subir a Dropbox: receiptFileId o expenseId faltantes', {
+            receiptFileId,
+            expenseId
+          })
         }
       }
 

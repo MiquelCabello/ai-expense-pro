@@ -257,11 +257,37 @@ export default function ExpensesPage() {
     
     try {
       setActionLoading(true);
+      
+      // Si tiene archivo en Dropbox, eliminarlo primero
+      if (selectedExpense.dropbox_path) {
+        console.log('[ExpensesPage] Eliminando archivo de Dropbox:', selectedExpense.dropbox_path);
+        try {
+          const { error: dropboxError } = await supabase.functions.invoke('delete-from-dropbox', {
+            body: {
+              dropbox_path: selectedExpense.dropbox_path,
+            }
+          });
+          
+          if (dropboxError) {
+            console.error('[ExpensesPage] Error eliminando de Dropbox:', dropboxError);
+            toast.error('Error al eliminar archivo de Dropbox', {
+              description: 'El gasto será rechazado pero el archivo podría quedar en Dropbox'
+            });
+          } else {
+            console.log('[ExpensesPage] Archivo eliminado de Dropbox correctamente');
+          }
+        } catch (dropboxError) {
+          console.error('[ExpensesPage] Error en proceso de Dropbox:', dropboxError);
+        }
+      }
+      
       const { error } = await supabase
         .from('expenses')
         .update({ 
           status: 'REJECTED',
-          approver_id: user?.id
+          approver_id: user?.id,
+          dropbox_path: null,
+          dropbox_url: null,
         })
         .eq('id', selectedExpense.id);
       
@@ -291,18 +317,46 @@ export default function ExpensesPage() {
     const isOwnerOrCompanyAdmin = membership.role === "owner" || membership.role === "company_admin";
 
     if (isOwnerOrCompanyAdmin) {
-      // Eliminación directa
-      const { error } = await supabase
-        .from("expenses")
-        .delete()
-        .eq("id", selectedExpense.id);
+      try {
+        // Si tiene archivo en Dropbox, eliminarlo primero
+        if (selectedExpense.dropbox_path) {
+          console.log('[ExpensesPage] Eliminando archivo de Dropbox:', selectedExpense.dropbox_path);
+          try {
+            const { error: dropboxError } = await supabase.functions.invoke('delete-from-dropbox', {
+              body: {
+                dropbox_path: selectedExpense.dropbox_path,
+              }
+            });
+            
+            if (dropboxError) {
+              console.error('[ExpensesPage] Error eliminando de Dropbox:', dropboxError);
+              toast.error('Error al eliminar archivo de Dropbox', {
+                description: 'El gasto será eliminado pero el archivo podría quedar en Dropbox'
+              });
+            } else {
+              console.log('[ExpensesPage] Archivo eliminado de Dropbox correctamente');
+            }
+          } catch (dropboxError) {
+            console.error('[ExpensesPage] Error en proceso de Dropbox:', dropboxError);
+          }
+        }
+        
+        // Eliminación directa
+        const { error } = await supabase
+          .from("expenses")
+          .delete()
+          .eq("id", selectedExpense.id);
 
-      if (error) {
-        console.error('[ExpensesPage] Error deleting expense:', error);
+        if (error) {
+          console.error('[ExpensesPage] Error deleting expense:', error);
+          toast.error("Error al eliminar el gasto");
+        } else {
+          toast.success("Gasto eliminado correctamente");
+          fetchExpenses();
+        }
+      } catch (error) {
+        console.error('[ExpensesPage] Error in delete process:', error);
         toast.error("Error al eliminar el gasto");
-      } else {
-        toast.success("Gasto eliminado correctamente");
-        fetchExpenses();
       }
     } else {
       // Crear solicitud de eliminación para department_admin
