@@ -53,6 +53,11 @@ Deno.serve(async (req) => {
     console.log('[upload-to-dropbox] Refreshing access token...')
     const authString = btoa(`${DROPBOX_APP_KEY}:${DROPBOX_APP_SECRET}`)
     
+    console.log('[upload-to-dropbox] Auth request details:', {
+      app_key_length: DROPBOX_APP_KEY.length,
+      refresh_token_length: DROPBOX_REFRESH_TOKEN.length,
+    })
+    
     const tokenResponse = await fetch('https://api.dropbox.com/oauth2/token', {
       method: 'POST',
       headers: {
@@ -64,13 +69,20 @@ Deno.serve(async (req) => {
 
     if (!tokenResponse.ok) {
       const errorText = await tokenResponse.text()
-      console.error('[upload-to-dropbox] Token refresh failed:', errorText)
-      throw new Error(`Failed to refresh Dropbox token: ${errorText}`)
+      console.error('[upload-to-dropbox] Token refresh failed:', {
+        status: tokenResponse.status,
+        statusText: tokenResponse.statusText,
+        body: errorText,
+      })
+      throw new Error(`Failed to refresh Dropbox token (${tokenResponse.status}): ${errorText}`)
     }
 
     const tokenData: DropboxTokenResponse = await tokenResponse.json()
     const DROPBOX_ACCESS_TOKEN = tokenData.access_token
-    console.log('[upload-to-dropbox] Access token refreshed successfully')
+    console.log('[upload-to-dropbox] Access token refreshed successfully:', {
+      token_length: DROPBOX_ACCESS_TOKEN.length,
+      expires_in: tokenData.expires_in,
+    })
 
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
