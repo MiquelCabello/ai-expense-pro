@@ -1,10 +1,19 @@
-/// <reference path="../types.d.ts" />
+
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
 const json = (body: unknown, init: ResponseInit = {}) =>
   new Response(JSON.stringify(body), {
-    headers: { "Content-Type": "application/json", ...(init.headers || {}) },
+    headers: { 
+      ...corsHeaders,
+      "Content-Type": "application/json", 
+      ...(init.headers || {}) 
+    },
     status: init.status ?? 200,
   })
 
@@ -48,7 +57,7 @@ type ExtractionOutcome =
   | { type: 'FACTURA'; data: InvoiceExtractResult }
   | { type: 'TICKET'; data: TicketExtractResult }
 
-const GEMINI_MODEL = Deno.env.get('GEMINI_MODEL') || 'gemini-1.5-pro-latest'
+const GEMINI_MODEL = Deno.env.get('GEMINI_MODEL') || 'gemini-2.5-flash'
 
 async function callGeminiJSON({
   apiKey,
@@ -85,7 +94,17 @@ async function callGeminiJSON({
   for (let i = 0; i <= retries; i++) {
     try {
       const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`)
+      if (!res.ok) {
+        console.error('[ai-extract-expense] Gemini HTTP error', {
+          status: res.status,
+          statusText: res.statusText,
+          model: model,
+          hasApiKey: !!apiKey,
+          apiKeyPrefix: apiKey.substring(0, 10)
+        })
+        const errorText = await res.text().catch(() => 'No response body')
+        throw new Error(`Gemini HTTP ${res.status}: ${errorText}`)
+      }
       const j = await res.json()
       const text = j?.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
       if (!text) throw new Error('Gemini sin contenido')
@@ -94,6 +113,7 @@ async function callGeminiJSON({
       return parsed
     } catch (err) {
       lastErr = err
+      console.error(`[ai-extract-expense] Retry ${i}/${retries} failed:`, err)
       await sleep(200 * (i + 1))
     }
   }
@@ -105,16 +125,94 @@ function buildClassifyPrompt(fileName: string) {
 }
 
 function buildInvoiceExtractPrompt() {
-  return `Eres un extractor de datos de FACTURAS. Devuelve SOLO JSON válido con estas claves (usa null si no aplica):\n{\n  "vendor": string|null,\n  "expense_date": string|null,        // YYYY-MM-DD\n  "amount_gross": number|null,\n  "tax_vat": number|null,\n  "amount_net": number|null,\n  "currency": string|null,\n  "invoice_number": string|null,\n  "seller_tax_id": string|null,\n  "buyer_tax_id": string|null,\n  "tax_id": string|null,\n  "email": string|null,\n  "notes": string|null,\n  "ocr_text": string|null             // TEXTO OCR COMPLETO\n}\n\nReglas:\n- "expense_date" en formato YYYY-MM-DD si es posible.\n- Importes con punto decimal (ej. 1234.56).\n- Si no observas el dato, devuelve null.\n- No inventes números de factura ni identificadores fiscales.\n- "ocr_text" debe contener TODO el texto legible tal como aparece.`
+  return `Eres un extractor EXPERTO de datos de FACTURAS. 
+
+REGLAS CRÍTICAS PARA IDENTIFICACIÓN:
+1. ⚠️ SI VES dos identificadores fiscales DIFERENTES (CIF/NIF/NIE/VAT/Tax ID):
+   - "seller_tax_id": el del VENDEDOR/EMISOR (quien cobra)
+   - "buyer_tax_id": el del COMPRADOR/CLIENTE (quien paga)
+   - Ejemplo: Si ves "E-31898620" (vendedor) y "78222262k" (comprador) en el documento
+   
+2. ⚠️ SI VES un número de factura explícito:
+   - Busca: "Factura 66", "FACTURA #FRA-2025-...", "Invoice No. 123", "Nº factura: ..."
+   - "invoice_number": extrae el NÚMERO EXACTO sin texto adicional
+   - Ejemplos: "66", "FRA-2025-MAD-00000780", "F0000000242"
+   
+3. ⚠️ IMPORTES (muy importante diferenciar):
+   - "amount_gross": Total FINAL con IVA incluido (Total, Total a pagar)
+   - "tax_vat": SOLO la cantidad del IVA/impuesto
+   - "amount_net": Base imponible (sin IVA, antes de impuestos)
+
+4. ⚠️ DIRECCIÓN Y EMAIL DEL VENDEDOR:
+   - "address": Busca la dirección física del vendedor/emisor
+   - Suele estar cerca del nombre del vendedor y su CIF/NIF
+   - Ejemplos: "Calle Mayor 123", "Iriarteko borda s/n", "Plaza España, 5"
+   - "email": Busca el email de contacto del vendedor
+   - Puede aparecer al principio o al final de la factura
+   
+5. ⚠️ OCR_TEXT - FUNDAMENTAL:
+   - Incluye TODO el texto visible, palabra por palabra
+   - No resumas, no omitas nada
+   - Si ves "Factura" en el documento, DEBE aparecer en ocr_text
+
+Devuelve JSON válido con estas claves exactas:
+{
+  "vendor": string|null,              // Nombre del vendedor/empresa
+  "expense_date": string|null,        // Fecha en formato YYYY-MM-DD
+  "amount_gross": number|null,        // Total con IVA
+  "tax_vat": number|null,            // Solo IVA
+  "amount_net": number|null,         // Base sin IVA
+  "currency": string|null,           // EUR, USD, etc.
+  "invoice_number": string|null,     // ⚠️ CRÍTICO: número exacto
+  "seller_tax_id": string|null,      // ⚠️ CRÍTICO: CIF/NIF vendedor
+  "buyer_tax_id": string|null,       // ⚠️ CRÍTICO: CIF/NIF comprador
+  "tax_id": string|null,             // Otro identificador si existe
+  "address": string|null,            // ⚠️ IMPORTANTE: Dirección completa del vendedor
+  "email": string|null,              // ⚠️ IMPORTANTE: Email de contacto del vendedor
+  "notes": string|null,              // Notas adicionales
+  "ocr_text": string|null            // ⚠️ CRÍTICO: TODO el texto visible
+}
+
+⚠️ NO INVENTES DATOS. Si no ves algo claramente, usa null.
+⚠️ Los campos marcados como CRÍTICOS son especialmente importantes para clasificación.
+⚠️ IMPORTANTE: Extrae SIEMPRE la dirección y email del vendedor si aparecen en el documento.`
 }
 
 function buildTicketExtractPrompt() {
-  return `Eres un extractor de datos de TICKETS o RECIBOS SIMPLIFICADOS. Devuelve SOLO JSON válido con estas claves (usa null si no aplica):\n{\n  "vendor": string|null,\n  "expense_date": string|null,        // YYYY-MM-DD\n  "amount_total": number|null,\n  "tax_vat": number|null,\n  "amount_net": number|null,\n  "currency": string|null,\n  "payment_method": string|null,\n  "notes": string|null,\n  "ocr_text": string|null             // TEXTO OCR COMPLETO\n}\n\nReglas:\n- "expense_date" en formato YYYY-MM-DD si es posible.\n- Importes con punto decimal (ej. 45.90).\n- Si no ves el dato, usa null.\n- No inventes métodos de pago ni importes.\n- "ocr_text" debe contener TODO el texto legible tal como aparece.`
+  return `Eres un extractor EXPERTO de datos de TICKETS o RECIBOS SIMPLIFICADOS.
+
+REGLAS IMPORTANTES:
+1. Los tickets normalmente tienen UN SOLO identificador fiscal (del vendedor)
+2. Los tickets NO tienen número de factura formal
+3. IMPORTES:
+   - "amount_total": Total pagado
+   - "tax_vat": IVA si está desglosado
+   - "amount_net": Base sin IVA si está desglosado
+   
+4. ⚠️ OCR_TEXT - FUNDAMENTAL:
+   - Incluye TODO el texto visible, palabra por palabra
+   - No resumas, no omitas nada
+
+Devuelve JSON válido con estas claves exactas:
+{
+  "vendor": string|null,              // Nombre del comercio
+  "expense_date": string|null,        // Fecha en formato YYYY-MM-DD
+  "amount_total": number|null,        // Total pagado
+  "tax_vat": number|null,            // IVA si aparece
+  "amount_net": number|null,         // Base sin IVA si aparece
+  "currency": string|null,           // EUR, USD, etc.
+  "payment_method": string|null,     // Efectivo, Tarjeta, etc.
+  "notes": string|null,              // Notas adicionales
+  "ocr_text": string|null            // ⚠️ CRÍTICO: TODO el texto visible
+}
+
+⚠️ NO INVENTES DATOS. Si no ves algo claramente, usa null.
+⚠️ El campo ocr_text es especialmente importante.`
 }
 
 serve(async (req: Request) => {
   try {
-    if (req.method === 'OPTIONS') return new Response(null, { status: 204 })
+    if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders, status: 204 })
 
     const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY') || ''
     if (!GEMINI_API_KEY) return json({ success: false, error: 'Falta GEMINI_API_KEY' }, { status: 500 })
@@ -183,7 +281,19 @@ serve(async (req: Request) => {
     return json({ success: true, classification, extraction })
   } catch (err: any) {
     console.error('[ai-extract-expense] error', err)
-    return json({ success: false, error: String(err?.message || err) }, { status: 500 })
+    const errorMessage = String(err?.message || err)
+    const isServiceUnavailable = errorMessage.includes('503') || errorMessage.includes('Service Unavailable')
+    
+    if (isServiceUnavailable) {
+      return json({ 
+        success: false, 
+        error: 'El servicio de análisis está temporalmente no disponible',
+        serviceError: true,
+        retryable: true
+      }, { status: 503 })
+    }
+    
+    return json({ success: false, error: errorMessage }, { status: 500 })
   }
 })
 

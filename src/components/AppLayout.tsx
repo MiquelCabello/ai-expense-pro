@@ -3,7 +3,7 @@ import Sidebar from './Sidebar';
 import { Bell } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { useAuth } from '@/hooks/useAuth';
+import { useAuthV2 } from '@/hooks/useAuthV2';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -11,7 +11,7 @@ interface AppLayoutProps {
 
 export default function AppLayout({ children }: AppLayoutProps) {
   const location = useLocation();
-  const { account } = useAuth();
+  const { company: account } = useAuthV2();
   
   // Get page title based on current route
   const getPageTitle = () => {

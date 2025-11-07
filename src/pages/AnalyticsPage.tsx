@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { useAuth } from '@/hooks/useAuth'
+import { useAuthV2 } from '@/hooks/useAuthV2'
 import { supabase } from '@/integrations/supabase/client'
 import AppLayout from '@/components/AppLayout'
 import { toLocalISODate, aggregateAnalytics } from '@/lib/analytics'
@@ -22,8 +22,8 @@ interface AnalyticsData {
 }
 
 export default function AnalyticsPage() {
-  const { profile } = useAuth()
-  const accountId = profile?.account_id ?? null
+  const { company, membership, user } = useAuthV2()
+  const companyId = company?.id ?? null
   const [analytics, setAnalytics] = useState<AnalyticsData>({
     totalExpenses: 0,
     expenseCount: 0,
@@ -37,13 +37,13 @@ export default function AnalyticsPage() {
   const [statusFilter, setStatusFilter] = useState<'APPROVED' | 'PENDING' | 'REJECTED' | 'ALL'>('APPROVED')
 
   useEffect(() => {
-    if (!profile || !accountId) return
+    if (!companyId) return
     fetchAnalytics()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile, accountId, timeRange, statusFilter])
+  }, [companyId, timeRange, statusFilter])
 
   const fetchAnalytics = async () => {
-    if (!profile || !accountId) return
+    if (!companyId) return
 
     try {
       setLoading(true)
@@ -65,19 +65,39 @@ export default function AnalyticsPage() {
         case 'last_year':
           startDate.setFullYear(startDate.getFullYear() - 1)
           break
+        case 'all':
+          startDate.setFullYear(2000) // Fecha muy antigua para incluir todos los gastos
+          break
       }
 
       let query = supabase
         .from('expenses')
         .select(`*, categories(name)`) // NOTE: join simple para nombre de categoría
-        .eq('account_id', accountId)
+        .eq('company_id', companyId)
         .gte('expense_date', toLocalISODate(startDate))
         .lte('expense_date', toLocalISODate(endDate))
 
-      // NOTE: empleados solo ven sus gastos
-      if (profile.role === 'EMPLOYEE') {
-        query = query.eq('employee_id', profile.user_id)
+      // NOTE: filtrar según rol
+      if (membership?.role === 'employee') {
+        // Empleados solo ven sus propios gastos
+        query = query.eq('employee_id', user?.id)
+      } else if (membership?.role === 'department_admin' && membership?.department_id) {
+        // Admins de departamento ven gastos de su departamento
+        const { data: deptMembers } = await supabase
+          .from('memberships')
+          .select('user_id')
+          .eq('company_id', companyId)
+          .eq('department_id', membership.department_id)
+        
+        if (deptMembers && deptMembers.length > 0) {
+          const deptUserIds = deptMembers.map(m => m.user_id)
+          query = query.in('employee_id', deptUserIds)
+        } else {
+          // Si no hay miembros, no mostrar nada
+          query = query.eq('employee_id', '00000000-0000-0000-0000-000000000000')
+        }
       }
+      // Owner y company_admin ven todos los gastos (sin filtro adicional)
 
       // NOTE: por defecto solo aprobados; se puede ampliar a ALL
       if (statusFilter !== 'ALL') {
@@ -157,6 +177,7 @@ export default function AnalyticsPage() {
                 <SelectItem value="last_3_months">Últimos 3 meses</SelectItem>
                 <SelectItem value="last_6_months">Últimos 6 meses</SelectItem>
                 <SelectItem value="last_year">Último año</SelectItem>
+                <SelectItem value="all">Todos los gastos</SelectItem>
               </SelectContent>
             </Select>
 

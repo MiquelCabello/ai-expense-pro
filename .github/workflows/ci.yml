@@ -11,51 +11,52 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        cache: 'npm'
+      - name: Use Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
 
-    - name: Install dependencies
-      run: npm ci
+      - name: Install dependencies
+        run: npm ci
 
-    - name: Type check
-      run: npm run typecheck
+      - name: Type check
+        run: npm run typecheck
 
-    - name: Lint
-      run: npm run lint
+      - name: Lint
+        run: npm run lint
 
-    - name: Run tests
-      run: npm run test
+      - name: Run tests
+        run: npm run test -- --run
 
-    - name: Build
-      run: npm run build
+      - name: Build
+        run: npm run build
 
-    - name: Upload coverage reports
-      uses: codecov/codecov-action@v3
-      if: success()
+      - name: Upload coverage reports
+        if: success()
+        uses: codecov/codecov-action@v3
 
   security:
     runs-on: ubuntu-latest
+
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        cache: 'npm'
+      - name: Use Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
 
-    - name: Install dependencies
-      run: npm ci
+      - name: Install dependencies
+        run: npm ci
 
-    - name: Security audit
-      run: npm audit --audit-level=high
+      - name: Security audit (npm)
+        run: npm audit --audit-level=high
 
-    - name: Check for vulnerabilities
-      run: npx audit-ci --high
+      - name: Check for vulnerabilities (audit-ci)
+        run: npx audit-ci --high

@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
@@ -12,9 +13,9 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import AppLayout from '@/components/AppLayout';
-import { useAuth } from '@/hooks/useAuth';
+import { useAuthV2 } from '@/hooks/useAuthV2';
 import { useTheme } from '@/components/ThemeProvider';
-import { Settings, Euro, Globe, Clock, Palette, FolderOpen, Briefcase, Plus, Edit2, Trash2 } from 'lucide-react';
+import { Settings, Euro, Globe, Clock, Palette, FolderOpen, Briefcase, Plus, Edit2, Trash2, Building2, Upload, Image as ImageIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 interface Category {
@@ -30,18 +31,43 @@ interface ProjectCode {
   status: string;
 }
 
+interface Department {
+  id: string;
+  name: string;
+  company_id: string;
+  created_at: string;
+}
+
 const PREFERENCES_STORAGE_KEY = 'expensepro-general-preferences';
 
 const isValidThemePreference = (value: unknown): value is 'light' | 'dark' | 'system' =>
   value === 'light' || value === 'dark' || value === 'system';
 
 export default function ConfigurationPage() {
-  const { profile, account, isMaster, user } = useAuth();
+  const { company, isMaster, user, membership } = useAuthV2();
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
   const [categories, setCategories] = useState<Category[]>([]);
   const [projectCodes, setProjectCodes] = useState<ProjectCode[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Company info states
+  const [companyInfo, setCompanyInfo] = useState({
+    name: '',
+    tax_id: '',
+    address: '',
+    city: '',
+    postal_code: '',
+    phone: '',
+    email: '',
+    website: '',
+    description: '',
+    logo_url: '',
+  });
+  const [isSavingCompany, setIsSavingCompany] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
 
   // Configuration states
   const [language, setLanguage] = useState('es');
@@ -57,46 +83,52 @@ export default function ConfigurationPage() {
   // Dialog states
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [editingProject, setEditingProject] = useState<ProjectCode | null>(null);
+  const [editingDepartment, setEditingDepartment] = useState<Department | null>(null);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newCategoryBudget, setNewCategoryBudget] = useState('');
   const [newProjectCode, setNewProjectCode] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
+  const [newDepartmentName, setNewDepartmentName] = useState('');
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [isAddingProject, setIsAddingProject] = useState(false);
+  const [isAddingDepartment, setIsAddingDepartment] = useState(false);
   const [categoryToDelete, setCategoryToDelete] = useState<Category | null>(null);
   const [projectToDelete, setProjectToDelete] = useState<ProjectCode | null>(null);
+  const [departmentToDelete, setDepartmentToDelete] = useState<Department | null>(null);
   const [isDeletingCategory, setIsDeletingCategory] = useState(false);
   const [isDeletingProject, setIsDeletingProject] = useState(false);
+  const [isDeletingDepartment, setIsDeletingDepartment] = useState(false);
 
   const planNameMap: Record<'FREE' | 'PROFESSIONAL' | 'ENTERPRISE', string> = {
     FREE: 'Starter',
     PROFESSIONAL: 'Professional',
     ENTERPRISE: 'Enterprise',
   };
-  const planConfig: Record<'FREE' | 'PROFESSIONAL' | 'ENTERPRISE', { maxEmployees: number | null; monthlyLimit: number | null; categoryLimit: number | null; projectLimit: number | null }> = {
-    FREE: { maxEmployees: 2, monthlyLimit: 50, categoryLimit: 0, projectLimit: 0 },
-    PROFESSIONAL: { maxEmployees: 25, monthlyLimit: null, categoryLimit: 5, projectLimit: 10 },
-    ENTERPRISE: { maxEmployees: null, monthlyLimit: null, categoryLimit: null, projectLimit: null },
+  const planConfig: Record<'free' | 'pro' | 'enterprise', { maxEmployees: number | null; monthlyLimit: number | null; categoryLimit: number | null; projectLimit: number | null }> = {
+    free: { maxEmployees: 2, monthlyLimit: 50, categoryLimit: 0, projectLimit: 0 },
+    pro: { maxEmployees: 25, monthlyLimit: null, categoryLimit: 5, projectLimit: 10 },
+    enterprise: { maxEmployees: null, monthlyLimit: null, categoryLimit: null, projectLimit: null },
   };
-  const planKey = (account?.plan ?? 'FREE') as 'FREE' | 'PROFESSIONAL' | 'ENTERPRISE';
-  const planName = isMaster ? 'Master' : planNameMap[planKey];
-  const resolvedAccountId = isMaster ? null : (profile?.account_id ?? account?.id ?? null);
-  const canAddCustomCategories = planKey !== 'FREE';
-  const canManageProjects = planKey !== 'FREE';
-  const maxEmployees = isMaster ? null : account?.max_employees ?? planConfig[planKey].maxEmployees;
-  const monthlyLimit = isMaster ? null : account?.monthly_expense_limit ?? planConfig[planKey].monthlyLimit;
+  const planKey = (company?.plan ?? 'free') as 'free' | 'pro' | 'enterprise';
+  const planName = isMaster ? 'Master' : (planKey === 'free' ? 'Starter' : planKey === 'pro' ? 'Professional' : 'Enterprise');
+  const resolvedAccountId = isMaster ? null : (company?.id ?? null);
+  const canAddCustomCategories = planKey !== 'free';
+  const canManageProjects = planKey !== 'free';
+  const canManageDepartments = planKey === 'enterprise' || isMaster;
+  const maxEmployees = isMaster ? null : company?.max_employees ?? planConfig[planKey].maxEmployees;
+  const monthlyLimit = isMaster ? null : company?.monthly_expense_limit ?? planConfig[planKey].monthlyLimit;
   const categoryLimit = planConfig[planKey].categoryLimit;
   const projectLimit = planConfig[planKey].projectLimit;
-  const isCategoriesEnabled = planKey !== 'FREE';
+  const isCategoriesEnabled = planKey !== 'free';
   const categoriesLimitReached = typeof categoryLimit === 'number' && categories.length >= categoryLimit;
   const projectLimitReached = typeof projectLimit === 'number' && projectCodes.length >= projectLimit;
-  const isAdminUser = isMaster || profile?.role === 'ADMIN';
+  const isAdminUser = isMaster || membership?.role === 'owner' || membership?.role === 'company_admin' || membership?.role === 'global_admin';
 
   useEffect(() => {
-    if (profile && !isAdminUser) {
+    if (!loading && !isAdminUser && !isMaster) {
       navigate('/dashboard', { replace: true });
     }
-  }, [profile, isAdminUser, navigate]);
+  }, [loading, isAdminUser, isMaster, navigate]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -149,23 +181,43 @@ export default function ConfigurationPage() {
   const loadData = useCallback(async () => {
     try {
       if (!isMaster) {
-        if (profile && profile.role !== 'ADMIN') {
+        const isAdmin = membership?.role === 'owner' || 
+                        membership?.role === 'company_admin' || 
+                        membership?.role === 'global_admin';
+        if (!isAdmin) {
           setCategories([]);
           setProjectCodes([]);
-          setLoading(false);
-          return;
-        }
-        if (!profile) {
+          setDepartments([]);
           setLoading(false);
           return;
         }
         if (!resolvedAccountId) {
-          console.warn('[Configuration] Missing account_id for non-master user', profile?.id);
+          console.warn('[Configuration] Missing company_id for non-master user');
           setCategories([]);
           setProjectCodes([]);
+          setDepartments([]);
           setLoading(false);
           return;
         }
+      }
+
+      // Cargar información de la empresa SIEMPRE
+      if (company?.id) {
+        console.log('[Configuration] Loading company info:', company);
+        setCompanyInfo({
+          name: company.name || '',
+          tax_id: company.tax_id || '',
+          address: company.address || '',
+          city: company.city || '',
+          postal_code: company.postal_code || '',
+          phone: company.phone || '',
+          email: company.email || '',
+          website: company.website || '',
+          description: company.description || '',
+          logo_url: company.logo_url || '',
+        });
+      } else {
+        console.warn('[Configuration] No company data available');
       }
 
       let categoriesQuery = supabase
@@ -174,7 +226,7 @@ export default function ConfigurationPage() {
         .order('name');
 
       if (!isMaster && resolvedAccountId) {
-        categoriesQuery = categoriesQuery.eq('account_id', resolvedAccountId);
+        categoriesQuery = categoriesQuery.eq('company_id', resolvedAccountId);
       }
 
       let projectCodesQuery = supabase
@@ -184,26 +236,42 @@ export default function ConfigurationPage() {
         .order('code');
 
       if (!isMaster && resolvedAccountId) {
-        projectCodesQuery = projectCodesQuery.eq('account_id', resolvedAccountId);
+        projectCodesQuery = projectCodesQuery.eq('company_id', resolvedAccountId);
       }
 
-      const [{ data: categoriesData, error: categoriesError }, { data: projectCodesData, error: projectCodesError }] = await Promise.all([
+      let departmentsQuery = supabase
+        .from('departments')
+        .select('*')
+        .order('name');
+
+      if (!isMaster && resolvedAccountId) {
+        departmentsQuery = departmentsQuery.eq('company_id', resolvedAccountId);
+      }
+
+      const [
+        { data: categoriesData, error: categoriesError }, 
+        { data: projectCodesData, error: projectCodesError },
+        { data: departmentsData, error: departmentsError }
+      ] = await Promise.all([
         categoriesQuery,
         projectCodesQuery,
+        departmentsQuery,
       ]);
 
       if (categoriesError) throw categoriesError;
       if (projectCodesError) throw projectCodesError;
+      if (departmentsError) throw departmentsError;
 
       setCategories(categoriesData ?? []);
       setProjectCodes(projectCodesData ?? []);
+      setDepartments(departmentsData ?? []);
     } catch (error) {
       console.error('Error loading configuration data:', error);
       toast.error('Error al cargar los datos de configuración');
     } finally {
       setLoading(false);
     }
-  }, [resolvedAccountId, isMaster, profile]);
+  }, [resolvedAccountId, isMaster, membership, company]);
 
   const savePreferences = async () => {
     try {
@@ -229,17 +297,123 @@ export default function ConfigurationPage() {
     loadData();
   }, [loadData]);
 
+  // Actualizar companyInfo cuando company cambie
+  useEffect(() => {
+    if (company) {
+      setCompanyInfo({
+        name: company.name || '',
+        tax_id: company.tax_id || '',
+        address: company.address || '',
+        city: company.city || '',
+        postal_code: company.postal_code || '',
+        phone: company.phone || '',
+        email: company.email || '',
+        website: company.website || '',
+        description: company.description || '',
+        logo_url: company.logo_url || '',
+      });
+    }
+  }, [company]);
+
   const saveCompanyProfile = async (event: React.FormEvent) => {
     event.preventDefault();
 
-    if (!account || !profile) {
+    if (!company?.id) {
       toast.error('No se ha podido cargar la cuenta activa');
       return;
     }
 
-    // Placeholder: simulate persistence
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    toast.success('Datos de la empresa guardados (placeholder)');
+    try {
+      setIsSavingCompany(true);
+      const { error } = await supabase
+        .from('companies')
+        .update({
+          name: companyInfo.name,
+          tax_id: companyInfo.tax_id,
+          address: companyInfo.address,
+          city: companyInfo.city,
+          postal_code: companyInfo.postal_code,
+          phone: companyInfo.phone,
+          email: companyInfo.email,
+          website: companyInfo.website,
+          description: companyInfo.description,
+        })
+        .eq('id', company.id);
+
+      if (error) throw error;
+
+      toast.success('Datos de la empresa guardados correctamente');
+      
+      // Recargar datos para refrescar todo
+      await loadData();
+    } catch (error) {
+      console.error('Error saving company profile:', error);
+      toast.error('Error al guardar datos de la empresa');
+    } finally {
+      setIsSavingCompany(false);
+    }
+  };
+
+  const handleLogoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !company?.id) return;
+
+    // Validar tipo de archivo
+    if (!file.type.startsWith('image/')) {
+      toast.error('Por favor selecciona una imagen válida');
+      return;
+    }
+
+    // Validar tamaño (max 2MB)
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('La imagen debe ser menor a 2MB');
+      return;
+    }
+
+    try {
+      setUploadingLogo(true);
+
+      // Subir a storage
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${company.id}-${Date.now()}.${fileExt}`;
+      const filePath = `logos/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('receipts')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: true
+        });
+
+      if (uploadError) throw uploadError;
+
+      // Obtener URL pública
+      const { data: { publicUrl } } = supabase.storage
+        .from('receipts')
+        .getPublicUrl(filePath);
+
+      // Actualizar empresa con el logo
+      const { error: updateError } = await supabase
+        .from('companies')
+        .update({ logo_url: publicUrl })
+        .eq('id', company.id);
+
+      if (updateError) throw updateError;
+
+      // Actualizar el estado local inmediatamente con cachebuster
+      const logoUrlWithCachebuster = `${publicUrl}?t=${Date.now()}`;
+      setCompanyInfo(prev => ({ ...prev, logo_url: logoUrlWithCachebuster }));
+      
+      toast.success('Logo actualizado correctamente');
+      
+      // Recargar datos para refrescar el contexto completo
+      await loadData();
+    } catch (error) {
+      console.error('Error uploading logo:', error);
+      toast.error('Error al subir el logo');
+    } finally {
+      setUploadingLogo(false);
+    }
   };
 
   const saveFinancialConfig = async () => {
@@ -278,7 +452,7 @@ export default function ConfigurationPage() {
           budget_monthly: newCategoryBudget ? parseFloat(newCategoryBudget) : null
         })
         .eq('id', editingCategory.id)
-        .eq('account_id', resolvedAccountId);
+        .eq('company_id', resolvedAccountId);
 
       if (error) throw error;
 
@@ -325,7 +499,7 @@ export default function ConfigurationPage() {
         .insert({
           name: newCategoryName,
           budget_monthly: newCategoryBudget ? parseFloat(newCategoryBudget) : null,
-          account_id: resolvedAccountId
+          company_id: resolvedAccountId
         });
 
       if (error) throw error;
@@ -365,7 +539,7 @@ export default function ConfigurationPage() {
           name: newProjectName
         })
         .eq('id', editingProject.id)
-        .eq('account_id', resolvedAccountId);
+        .eq('company_id', resolvedAccountId);
 
       if (error) throw error;
 
@@ -409,7 +583,7 @@ export default function ConfigurationPage() {
           code: newProjectCode,
           name: newProjectName,
           status: 'ACTIVE',
-          account_id: resolvedAccountId
+          company_id: resolvedAccountId
         });
 
       if (error) throw error;
@@ -441,7 +615,7 @@ export default function ConfigurationPage() {
         .from('categories')
         .delete()
         .eq('id', categoryToDelete.id)
-        .eq('account_id', resolvedAccountId);
+        .eq('company_id', resolvedAccountId);
 
       if (error) throw error;
 
@@ -472,7 +646,7 @@ export default function ConfigurationPage() {
         .from('project_codes')
         .update({ status: 'INACTIVE' })
         .eq('id', projectToDelete.id)
-        .eq('account_id', resolvedAccountId);
+        .eq('company_id', resolvedAccountId);
 
       if (error) throw error;
 
@@ -486,11 +660,124 @@ export default function ConfigurationPage() {
     }
   };
 
+  // Funciones para gestión de Departamentos
+  const handleEditDepartment = (department: Department) => {
+    setEditingDepartment(department);
+    setNewDepartmentName(department.name);
+  };
+
+  const handleUpdateDepartment = async () => {
+    if (isMaster) {
+      toast.info('Gestiona los departamentos desde la consola administrativa global.');
+      return;
+    }
+
+    if (!editingDepartment || !resolvedAccountId) {
+      toast.error('No se ha podido identificar la cuenta activa.');
+      return;
+    }
+
+    if (!newDepartmentName.trim()) {
+      toast.error('El nombre del departamento es requerido');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('departments')
+        .update({
+          name: newDepartmentName,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', editingDepartment.id)
+        .eq('company_id', resolvedAccountId);
+
+      if (error) throw error;
+
+      toast.success('Departamento actualizado correctamente');
+      setEditingDepartment(null);
+      loadData();
+    } catch (error) {
+      toast.error('Error al actualizar departamento');
+    }
+  };
+
+  const handleAddDepartment = async () => {
+    if (isMaster) {
+      toast.info('Gestiona los departamentos desde la consola administrativa global.');
+      return;
+    }
+
+    if (!resolvedAccountId) {
+      toast.error('No se ha podido identificar la cuenta activa.');
+      return;
+    }
+
+    if (!canManageDepartments) {
+      toast.error('La gestión de departamentos está disponible solo en el plan Enterprise.');
+      return;
+    }
+
+    if (!newDepartmentName.trim()) {
+      toast.error('El nombre del departamento es requerido');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('departments')
+        .insert({
+          name: newDepartmentName,
+          company_id: resolvedAccountId
+        });
+
+      if (error) throw error;
+
+      toast.success('Departamento añadido correctamente');
+      setIsAddingDepartment(false);
+      setNewDepartmentName('');
+      loadData();
+    } catch (error) {
+      toast.error('Error al añadir departamento');
+    }
+  };
+
+  const handleDeleteDepartment = async () => {
+    if (isMaster) {
+      toast.info('Gestiona los departamentos desde la consola administrativa global.');
+      return;
+    }
+
+    if (!departmentToDelete || !resolvedAccountId) {
+      toast.error('No se ha podido identificar la cuenta activa.');
+      return;
+    }
+
+    setIsDeletingDepartment(true);
+    try {
+      const { error } = await supabase
+        .from('departments')
+        .delete()
+        .eq('id', departmentToDelete.id)
+        .eq('company_id', resolvedAccountId);
+
+      if (error) throw error;
+
+      toast.success(`Departamento "${departmentToDelete.name}" eliminado correctamente`);
+      setDepartmentToDelete(null);
+      loadData();
+    } catch (error) {
+      toast.error('Error al eliminar departamento');
+    } finally {
+      setIsDeletingDepartment(false);
+    }
+  };
+
   const handleUpgradeClick = () => {
     toast.info('La actualización de plan estará disponible en la integración de pagos.');
   };
 
-  if (profile && !isAdminUser) {
+  if (loading || (!isAdminUser && !isMaster)) {
     return null;
   }
 
@@ -543,54 +830,166 @@ export default function ConfigurationPage() {
           </CardContent>
         </Card>
 
-        {!isMaster && (
+        {!isMaster && company && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center space-x-2">
-                <Briefcase className="h-5 w-5" />
-                <span>Datos de la empresa</span>
+                <Building2 className="h-5 w-5" />
+                <span>Información de la empresa</span>
               </CardTitle>
               <CardDescription>
-                Información básica de tu organización. Se mostrará como referencia a tus empleados.
+                Personaliza la información de tu organización que se mostrará en el perfil de empresa.
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <form onSubmit={saveCompanyProfile} className="grid gap-4 md:grid-cols-2">
-                <div className="md:col-span-2 space-y-2">
-                  <Label>Nombre comercial</Label>
-                  <Input defaultValue={account?.name ?? ''} placeholder="Nombre de la empresa" />
+              <form onSubmit={saveCompanyProfile} className="space-y-6">
+                {/* Logo Section */}
+                <div className="flex items-center gap-6">
+                  <div className="relative group">
+                    {companyInfo.logo_url ? (
+                      <img 
+                        src={companyInfo.logo_url} 
+                        alt="Logo de la empresa"
+                        className="h-24 w-24 object-contain rounded-lg border-2 border-border"
+                      />
+                    ) : (
+                      <div className="h-24 w-24 bg-muted rounded-lg border-2 border-dashed border-border flex items-center justify-center">
+                        <Building2 className="h-8 w-8 text-muted-foreground" />
+                      </div>
+                    )}
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="absolute -bottom-2 -right-2 rounded-full h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploadingLogo}
+                    >
+                      {uploadingLogo ? (
+                        <div className="h-4 w-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <ImageIcon className="h-4 w-4" />
+                      )}
+                    </Button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleLogoUpload}
+                      className="hidden"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-sm font-medium">Logo de la empresa</Label>
+                    <p className="text-xs text-muted-foreground">
+                      PNG, JPG o WEBP. Máximo 2MB.
+                    </p>
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label>Sector</Label>
-                  <Select defaultValue="services">
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecciona sector" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="services">Servicios profesionales</SelectItem>
-                      <SelectItem value="retail">Retail</SelectItem>
-                      <SelectItem value="manufacturing">Manufactura</SelectItem>
-                    </SelectContent>
-                  </Select>
+
+                <Separator />
+
+                {/* Información básica */}
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="md:col-span-2 space-y-2">
+                    <Label htmlFor="company-name">Nombre de la empresa *</Label>
+                    <Input 
+                      id="company-name"
+                      value={companyInfo.name}
+                      onChange={(e) => setCompanyInfo({ ...companyInfo, name: e.target.value })}
+                      placeholder="Nombre de la empresa"
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="tax-id">CIF/NIF</Label>
+                    <Input 
+                      id="tax-id"
+                      value={companyInfo.tax_id}
+                      onChange={(e) => setCompanyInfo({ ...companyInfo, tax_id: e.target.value })}
+                      placeholder="B12345678"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="company-email">Email de contacto</Label>
+                    <Input 
+                      id="company-email"
+                      type="email"
+                      value={companyInfo.email}
+                      onChange={(e) => setCompanyInfo({ ...companyInfo, email: e.target.value })}
+                      placeholder="contacto@empresa.com"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="company-phone">Teléfono</Label>
+                    <Input 
+                      id="company-phone"
+                      value={companyInfo.phone}
+                      onChange={(e) => setCompanyInfo({ ...companyInfo, phone: e.target.value })}
+                      placeholder="+34 123 456 789"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="company-website">Sitio web</Label>
+                    <Input 
+                      id="company-website"
+                      type="url"
+                      value={companyInfo.website}
+                      onChange={(e) => setCompanyInfo({ ...companyInfo, website: e.target.value })}
+                      placeholder="https://www.empresa.com"
+                    />
+                  </div>
+
+                  <div className="md:col-span-2 space-y-2">
+                    <Label htmlFor="company-address">Dirección</Label>
+                    <Input 
+                      id="company-address"
+                      value={companyInfo.address}
+                      onChange={(e) => setCompanyInfo({ ...companyInfo, address: e.target.value })}
+                      placeholder="Calle Principal 123"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="company-city">Ciudad</Label>
+                    <Input 
+                      id="company-city"
+                      value={companyInfo.city}
+                      onChange={(e) => setCompanyInfo({ ...companyInfo, city: e.target.value })}
+                      placeholder="Madrid"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="company-postal">Código postal</Label>
+                    <Input 
+                      id="company-postal"
+                      value={companyInfo.postal_code}
+                      onChange={(e) => setCompanyInfo({ ...companyInfo, postal_code: e.target.value })}
+                      placeholder="28001"
+                    />
+                  </div>
+
+                  <div className="md:col-span-2 space-y-2">
+                    <Label htmlFor="company-description">Descripción</Label>
+                    <Textarea
+                      id="company-description"
+                      value={companyInfo.description}
+                      onChange={(e) => setCompanyInfo({ ...companyInfo, description: e.target.value })}
+                      placeholder="Describe brevemente tu empresa y sus principales actividades..."
+                      rows={4}
+                    />
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label>Sede principal</Label>
-                  <Input defaultValue={profile?.region ?? ''} placeholder="Ciudad / Región" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Correo de contacto</Label>
-                  <Input type="email" defaultValue={user?.email ?? ''} placeholder="contacto@empresa.com" />
-                </div>
-                <div className="space-y-2 md:col-span-2">
-                  <Label>Descripción breve</Label>
-                  <textarea
-                    className="w-full border rounded-md p-2 text-sm"
-                    rows={3}
-                    placeholder="Describe brevemente tu empresa y sus principales operaciones"
-                  />
-                </div>
-                <div className="md:col-span-2">
-                  <Button type="submit">Guardar datos de la empresa</Button>
+
+                <div className="flex justify-end">
+                  <Button type="submit" disabled={isSavingCompany}>
+                    {isSavingCompany ? 'Guardando...' : 'Guardar cambios'}
+                  </Button>
                 </div>
               </form>
             </CardContent>
@@ -1088,6 +1487,144 @@ export default function ConfigurationPage() {
               <CardContent>
                 <p className="text-sm text-muted-foreground">
                   Los códigos de proyecto personalizados están disponibles a partir del plan Professional.
+                </p>
+                <Button className="mt-4" variant="outline" onClick={handleUpgradeClick}>Ver planes</Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Gestión de Departamentos - Solo ENTERPRISE */}
+          {canManageDepartments ? (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <Building2 className="h-5 w-5" />
+                    <span>Gestión de Departamentos</span>
+                  </div>
+                </div>
+                <CardDescription>Organiza a tus empleados por departamentos (solo Enterprise)</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {departments.map((department) => (
+                  <div
+                    key={department.id}
+                    className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-2 h-2 rounded-full bg-primary"></div>
+                      <span className="font-medium">{department.name}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2 sm:flex-nowrap sm:justify-end">
+                      <Dialog open={editingDepartment?.id === department.id} onOpenChange={(open) => !open && setEditingDepartment(null)}>
+                        <DialogTrigger asChild>
+                          <Button variant="outline" size="sm" onClick={() => handleEditDepartment(department)}>
+                            <Edit2 className="h-4 w-4 mr-1" />
+                            Editar
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                          <DialogHeader>
+                            <DialogTitle>Editar Departamento</DialogTitle>
+                            <DialogDescription>
+                              Actualiza el nombre del departamento
+                            </DialogDescription>
+                          </DialogHeader>
+                          <div className="space-y-4">
+                            <div>
+                              <Label htmlFor="department-name">Nombre</Label>
+                              <Input
+                                id="department-name"
+                                value={newDepartmentName}
+                                onChange={(e) => setNewDepartmentName(e.target.value)}
+                                placeholder="Nombre del departamento"
+                              />
+                            </div>
+                            <div className="flex justify-end space-x-2">
+                              <Button variant="outline" onClick={() => setEditingDepartment(null)}>
+                                Cancelar
+                              </Button>
+                              <Button onClick={handleUpdateDepartment}>
+                                Guardar
+                              </Button>
+                            </div>
+                          </div>
+                        </DialogContent>
+                      </Dialog>
+                      <Button variant="destructive" size="sm" onClick={() => setDepartmentToDelete(department)}>
+                        <Trash2 className="h-4 w-4 mr-1" />
+                        Eliminar
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+
+                <AlertDialog open={!!departmentToDelete} onOpenChange={(open) => !open && setDepartmentToDelete(null)}>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>¿Eliminar departamento?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Esta acción eliminará el departamento "{departmentToDelete?.name}".
+                        Los empleados asignados a este departamento quedarán sin departamento asignado.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                      <AlertDialogAction onClick={handleDeleteDepartment} disabled={isDeletingDepartment}>
+                        {isDeletingDepartment ? 'Eliminando...' : 'Eliminar'}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+
+                <Dialog open={isAddingDepartment} onOpenChange={setIsAddingDepartment}>
+                  <DialogTrigger asChild>
+                    <Button className="w-full bg-gradient-primary hover:opacity-90">
+                      <Plus className="h-4 w-4 mr-2" />
+                      Nuevo Departamento
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Nuevo Departamento</DialogTitle>
+                      <DialogDescription>
+                        Crea un nuevo departamento para organizar a tus empleados
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      <div>
+                        <Label htmlFor="department-new-name">Nombre</Label>
+                        <Input
+                          id="department-new-name"
+                          value={newDepartmentName}
+                          onChange={(e) => setNewDepartmentName(e.target.value)}
+                          placeholder="Ej: Recursos Humanos, IT, Ventas"
+                        />
+                      </div>
+                      <div className="flex justify-end space-x-2">
+                        <Button variant="outline" onClick={() => setIsAddingDepartment(false)}>
+                          Cancelar
+                        </Button>
+                        <Button onClick={handleAddDepartment}>
+                          Crear
+                        </Button>
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="opacity-90">
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <Building2 className="h-5 w-5" />
+                  <span>Gestión de Departamentos</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">
+                  La gestión de departamentos está disponible exclusivamente en el plan Enterprise.
                 </p>
                 <Button className="mt-4" variant="outline" onClick={handleUpgradeClick}>Ver planes</Button>
               </CardContent>

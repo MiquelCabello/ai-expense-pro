@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
-import { useAuth } from '@/hooks/useAuth'
+import { useAuthV2 } from '@/hooks/useAuthV2'
 import { supabase } from '@/integrations/supabase/client'
 import type { TablesInsert } from '@/integrations/supabase/types'
 import { toast } from 'sonner'
@@ -113,7 +113,8 @@ const toISODate = (val: any): string => {
 }
 
 const normalizeAIResponse = (raw: any): ExtractedData => {
-  const src = raw?.data ?? raw
+  // Soportar tanto el formato nuevo (extraction.data) como el legacy (data)
+  const src = raw?.extraction?.data ?? raw?.data ?? raw
   const vendor = pickField(src, 'vendor', 'merchant', 'commerce', 'company', 'company_name') ?? ''
   const expense_date = toISODate(pickField(src, 'expense_date', 'date', 'purchase_date', 'invoice_date') ?? '')
   const amount_gross = parseNumber(pickField(src, 'amount_gross', 'total', 'total_amount', 'amount')) ?? ((): number | undefined => {
@@ -170,14 +171,14 @@ const normalizeAIResponse = (raw: any): ExtractedData => {
 }
 
 export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) {
-  const { user, profile, account, isMaster } = useAuth()
+  const { user, membership, company, isMaster } = useAuthV2()
 
   const isAdmin = useMemo(() => {
-    const roleStr = (profile as any)?.role ? String((profile as any).role).toLowerCase() : ''
-    const flag = (profile as any)?.is_admin === true
-    const roles = (user?.app_metadata?.roles as string[] | undefined) ?? []
-    return flag || roleStr.includes('admin') || roleStr.includes('administrador') || roleStr.includes('owner') || roles.includes('admin') || roles.includes('owner')
-  }, [profile, user])
+    if (isMaster) return true
+    return membership?.role === 'owner' || membership?.role === 'company_admin' || membership?.role === 'global_admin'
+  }, [membership, isMaster])
+
+  const [companyPlan, setCompanyPlan] = useState<'free' | 'pro' | 'enterprise' | null>(null)
 
   const [step, setStep] = useState<'upload' | 'review'>('upload')
   const [modalOpen, setModalOpen] = useState(false)
@@ -194,14 +195,14 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
   const [aiClassification, setAiClassification] = useState<ClassificationResult | null>(null)
 
   const [selfEmployee, setSelfEmployee] = useState<any | null>(null)
-  const [accountId, setAccountId] = useState<string | null>(profile?.account_id ?? account?.id ?? null)
+  const [accountId, setAccountId] = useState<string | null>(company?.id ?? null)
   const [projects_list, setProjectsList] = useState<any[]>([])
   const [employees_list, setEmployeesList] = useState<any[]>([])
   const [categories_list, setCategoriesList] = useState<any[]>([])
   const [categoryIndex, setCategoryIndex] = useState<Record<string, string>>({})
   const [monthlyUsage, setMonthlyUsage] = useState<number | null>(null)
-  const monthlyLimit = typeof account?.monthly_expense_limit === 'number' ? account.monthly_expense_limit : null
-  const monthlyLimitKey = account?.monthly_expense_limit ?? null
+  const monthlyLimit = typeof company?.monthly_expense_limit === 'number' ? company.monthly_expense_limit : null
+  const monthlyLimitKey = company?.monthly_expense_limit ?? null
   const limitApplies = !isMaster && typeof monthlyLimit === 'number'
   const hasReachedMonthlyLimit = limitApplies && monthlyLimit !== null && typeof monthlyUsage === 'number' && monthlyUsage >= monthlyLimit
   const remainingMonthlySlots = limitApplies && monthlyLimit !== null && typeof monthlyUsage === 'number'
@@ -220,8 +221,29 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
   ) : null
 
   React.useEffect(() => {
-    setAccountId(profile?.account_id ?? account?.id ?? null)
-  }, [profile?.account_id, account?.id])
+    setAccountId(company?.id ?? null)
+  }, [company?.id])
+
+  // Obtener el plan de la compañía
+  React.useEffect(() => {
+    if (!company?.id) {
+      setCompanyPlan(null)
+      return
+    }
+    ;(async () => {
+      const { data, error } = await supabase
+        .from('companies')
+        .select('plan')
+        .eq('id', company.id)
+        .single()
+      if (error) {
+        console.warn('[ReceiptUpload] No se pudo obtener el plan', error)
+        setCompanyPlan(null)
+        return
+      }
+      setCompanyPlan(data?.plan as 'free' | 'pro' | 'enterprise' || null)
+    })()
+  }, [company?.id])
 
   React.useEffect(() => {
     if (!limitApplies || !accountId) {
@@ -237,7 +259,7 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
       const { count, error } = await supabase
         .from('expenses')
         .select('id', { count: 'exact', head: true })
-        .eq('account_id', accountId)
+        .eq('company_id', accountId)
         .gte('expense_date', monthStart.toISOString().slice(0, 10))
         .lt('expense_date', monthEnd.toISOString().slice(0, 10))
 
@@ -275,10 +297,16 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
   const [categoryPromptOpen, setCategoryPromptOpen] = useState(false)
   const [categoryProposedName, setCategoryProposedName] = useState('')
   const [creatingCategory, setCreatingCategory] = useState(false)
+  
+  // Modal para crear categoría desde la revisión
+  const [reviewCategoryDialogOpen, setReviewCategoryDialogOpen] = useState(false)
+  const [newCategoryName, setNewCategoryName] = useState('')
+  const [newCategoryBudget, setNewCategoryBudget] = useState('')
 
   const displayName =
-    selfEmployee?.full_name ?? (profile as any)?.full_name ?? (profile as any)?.name ??
-    (user?.user_metadata?.full_name as string | undefined) ?? (user?.user_metadata?.name as string | undefined) ??
+    selfEmployee?.full_name ?? 
+    (user?.user_metadata?.full_name as string | undefined) ?? 
+    (user?.user_metadata?.name as string | undefined) ??
     user?.email ?? ''
 
   const normalizeText = useCallback((s?: string) => {
@@ -307,30 +335,20 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
 
   React.useEffect(() => { setCategoryIndex(buildCategoryIndex(categories_list)) }, [categories_list, buildCategoryIndex])
 
-  // Self employee (tolerante si no existe la tabla employees)
+  // Self employee (using authV2 system)
   React.useEffect(() => {
     if (!user?.id) return
-    ;(async () => {
-      try {
-        const { data: emp, error } = await (supabase as any)
-          .from('employees')
-          .select('id, full_name, user_id, account_id')
-          .eq('user_id', user.id)
-          .maybeSingle()
-        if (error) throw error
-        if (emp) { setSelfEmployee(emp); setAccountId(emp.account_id || null); setFormData((p) => ({ ...p, employee_id: emp.id })) }
-        else setFormData((p) => ({ ...p, employee_id: user.id }))
-      } catch { setFormData((p) => ({ ...p, employee_id: user.id })) }
-    })()
+    // Set employee_id to current user
+    setFormData((p) => ({ ...p, employee_id: user.id }))
   }, [user?.id])
 
   // project_codes (fallback si no hay columna status)
   React.useEffect(() => {
     ;(async () => {
       try {
-        let q = supabase.from('project_codes').select('*').order('code'); if (accountId) q = q.eq('account_id', accountId)
+        let q = supabase.from('project_codes').select('*').order('code'); if (accountId) q = q.eq('company_id', accountId)
         const { data, error } = await q.eq('status', 'ACTIVE')
-        if (error) { let q2 = supabase.from('project_codes').select('*').order('code'); if (accountId) q2 = q2.eq('account_id', accountId); const { data: d2 } = await q2; setProjectsList(sortProjects(d2 || [])); return }
+        if (error) { let q2 = supabase.from('project_codes').select('*').order('code'); if (accountId) q2 = q2.eq('company_id', accountId); const { data: d2 } = await q2; setProjectsList(sortProjects(d2 || [])); return }
         setProjectsList(sortProjects(data || []))
       } catch {}
     })()
@@ -340,15 +358,15 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
   React.useEffect(() => {
     ;(async () => {
       try {
-        let q = supabase.from('categories').select('*').order('name'); if (accountId) q = q.eq('account_id', accountId)
+        let q = supabase.from('categories').select('*').order('name'); if (accountId) q = q.eq('company_id', accountId)
         const { data, error } = await (q as any).eq('status', 'ACTIVE')
-        if (error) { let q2 = supabase.from('categories').select('*').order('name'); if (accountId) q2 = q2.eq('account_id', accountId); const { data: d2 } = await q2; setCategoriesList(sortCategories(d2 || [])); return }
+        if (error) { let q2 = supabase.from('categories').select('*').order('name'); if (accountId) q2 = q2.eq('company_id', accountId); const { data: d2 } = await q2; setCategoriesList(sortCategories(d2 || [])); return }
         setCategoriesList(sortCategories(data || []))
       } catch {}
     })()
   }, [accountId, sortCategories])
 
-  // employees (solo admin; tolerante si la tabla no existe o no tiene status)
+  // employees (solo admin; load from memberships)
   React.useEffect(() => {
     if (!accountId || !isAdmin) {
       setEmployeesList([])
@@ -357,18 +375,17 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
     ;(async () => {
       try {
         const { data, error } = await supabase
-          .from('profiles')
-          .select('user_id, name, status')
-          .eq('account_id', accountId)
-          .eq('status', 'ACTIVE')
-          .order('name')
+          .from('memberships')
+          .select('user_id, profiles_v2(email)')
+          .eq('company_id', accountId)
+          .order('created_at')
         if (error) throw error
-        const normalized = (data || []).map((item) => ({
+        const normalized = (data || []).map((item: any) => ({
           id: item.user_id,
-          full_name: item.name,
-          email: '',
-          account_id: accountId,
-          status: item.status,
+          full_name: item.profiles_v2?.email || '', 
+          email: item.profiles_v2?.email || '',
+          company_id: accountId,
+          status: 'ACTIVE',
         }))
         setEmployeesList(normalized)
       } catch {
@@ -384,7 +401,7 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
       .on('postgres_changes', { event: '*', schema: 'public', table: 'project_codes' }, (payload) => {
         try {
           const n: any = (payload as any).new; const o: any = (payload as any).old
-          const ok = accountId ? (n?.account_id ?? o?.account_id) === accountId : true
+          const ok = accountId ? (n?.company_id ?? o?.company_id) === accountId : true
           if (!ok) return
           const add = () => setProjectsList((p) => sortProjects([...p.filter((x) => x.id !== n.id), n]))
           if ((payload as any).eventType === 'DELETE') setProjectsList((p) => p.filter((x) => x.id !== o?.id))
@@ -398,7 +415,7 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
       .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, (payload) => {
         try {
           const n: any = (payload as any).new; const o: any = (payload as any).old
-          const within = accountId ? (n?.account_id ?? o?.account_id) === accountId : true
+          const within = accountId ? (n?.company_id ?? o?.company_id) === accountId : true
           if (!within) return
           if ((payload as any).eventType === 'DELETE') setCategoriesList((prev) => prev.filter((c) => c.id !== o?.id))
           else setCategoriesList((prev) => sortCategories([...prev.filter((c) => c.id !== n.id), n]))
@@ -447,6 +464,11 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
 
   const processWithAI = async () => {
     if (!file || !user) return
+    // Validar categoría obligatoria para planes Pro y Enterprise
+    if (companyPlan !== 'free' && !formData.category_id) {
+      toast.error('Por favor selecciona una categoría antes de continuar')
+      return
+    }
     setProcessing(true)
     try {
       const rfId = genId(); const fileExt = (file.name.split('.').pop() || 'bin').toLowerCase(); const filePath = `receipts/${user.id}/${rfId}.${fileExt}`
@@ -471,14 +493,37 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         const fd = new FormData()
         fd.append('file', file, file.name); fd.append('userId', user.id); fd.append('file_url', signed.signedUrl)
         fd.append('provider', 'GEMINI'); fd.append('mime_type', file.type)
-        if (accountId) fd.append('account_id', accountId)
+        if (accountId) fd.append('company_id', accountId)
         if (formData.project_code_id) fd.append('project_code_id', formData.project_code_id)
         if (formData.notes) fd.append('notes', formData.notes)
         const res = await fetch(fnUrl, { method: 'POST', headers: { Authorization: `Bearer ${sessionRes.session?.access_token ?? ''}` }, body: fd })
-        if (!res.ok) { let msg = ''; try { const j = await res.json(); msg = j?.message || j?.error || '' } catch {}; throw new Error(`FN_${msg || res.statusText}`) }
+        if (!res.ok) { 
+          let errorData: any = {}
+          try { 
+            errorData = await res.json()
+          } catch {}
+          
+          if (res.status === 503) {
+            toast.error('El servicio de análisis está temporalmente no disponible. Por favor, intenta de nuevo en unos minutos.')
+            throw new Error('SERVICE_UNAVAILABLE')
+          }
+          
+          const msg = errorData?.message || errorData?.error || ''
+          throw new Error(`FN_${msg || res.statusText}`)
+        }
         aiData = await res.json()
       } catch (fnErr: any) {
         console.error('[DocType Debug] ai-extract-expense failed', fnErr)
+        console.error('[DocType Debug] Error details:', {
+          message: fnErr?.message,
+          status: fnErr?.status,
+          response: fnErr?.response
+        })
+        
+        if (fnErr?.message === 'SERVICE_UNAVAILABLE') {
+          throw fnErr
+        }
+        
         const allowLegacy = import.meta.env.VITE_ENABLE_LEGACY_RECEIPT_FUNC === 'true'
         if (!allowLegacy) {
           throw fnErr
@@ -489,6 +534,22 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         const { data, error } = await supabase.functions.invoke('extract-receipt', { body: { file_path: filePath, file_type: file.type } })
         if (error) throw new Error(`FN_${error.message || 'extract-receipt failed'}`)
         aiData = data
+      }
+
+      // Logging para debugging
+      console.log('[DocType Debug] aiData received:', {
+        hasClassification: !!aiData?.classification,
+        hasExtraction: !!aiData?.extraction,
+        classificationType: aiData?.classification?.type,
+        extractionType: aiData?.extraction?.type,
+        keys: Object.keys(aiData || {})
+      })
+
+      // Validación: verificar que aiData contiene datos útiles
+      if (!aiData || (!aiData.classification && !aiData.extraction && !aiData.data)) {
+        console.error('[DocType Debug] No valid data received from AI:', aiData)
+        toast.error('No se pudieron extraer datos del documento. Por favor, intenta de nuevo.')
+        throw new Error('NO_VALID_EXTRACTION_DATA')
       }
 
       const norm = normalizeAIResponse(aiData)
@@ -523,19 +584,65 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         norm.email = ((aiData?.data ?? aiData) as Record<string, unknown>).email as string
       }
 
-      // NUEVO: aplicar reglas R1–R4 y fijar sugerencia + docType UI
-      const aiBackendType = (normForClassification.type || normForClassification.kind || '').toString().toUpperCase()
+      // NUEVO: PRIORIDAD JERÁRQUICA - Backend prevalece SIEMPRE
+      const aiBackendType = (
+        aiData?.classification?.type ?? 
+        aiData?.extraction?.type ?? 
+        ''
+      ).toString().toUpperCase()
+      
+      console.log('[DocType Debug] Backend classification received:', {
+        aiBackendType,
+        fromClassification: aiData?.classification?.type,
+        fromExtraction: aiData?.extraction?.type,
+        backendReason: aiData?.classification?.reason,
+        backendConfidence: aiData?.classification?.confidence
+      })
+
       const serverDocType = (meta?.final_doc_type as string | undefined)?.toUpperCase()
       const serverClassificationPath = meta?.classification_path as ClassificationResult['classification_path'] | undefined
 
       let ai: ClassificationResult
+      let classificationSource: 'SERVER_META' | 'BACKEND_EXPLICIT' | 'BACKEND_VALIDATED' | 'LOCAL_FALLBACK' = 'LOCAL_FALLBACK'
+
       if (serverDocType) {
+        // Caso 1: Meta del servidor (legacy)
         ai = {
           aiSuggestion: serverDocType === 'FACTURA' ? 'invoice' : 'ticket',
-          classification_path:
-            serverClassificationPath ?? (serverDocType === 'FACTURA' ? 'R3' : 'R4'),
+          classification_path: serverClassificationPath ?? (serverDocType === 'FACTURA' ? 'R3' : 'R4'),
+        }
+        classificationSource = 'SERVER_META'
+      } else if (aiBackendType === 'FACTURA' || aiBackendType === 'TICKET') {
+        // Caso 2: Backend dio clasificación explícita
+        // ⚠️ VALIDAR coherencia: si dice FACTURA, debe tener datos mínimos
+        const hasInvoiceData = !!(
+          normForClassification.invoice_number ||
+          (normForClassification.seller_tax_id && normForClassification.buyer_tax_id) ||
+          normForClassification.ocr_text?.toLowerCase().includes('factura') ||
+          normForClassification.ocr_text?.toLowerCase().includes('invoice')
+        )
+
+        if (aiBackendType === 'FACTURA' && !hasInvoiceData) {
+          // Backend dice FACTURA pero faltan datos críticos → verificar con reglas locales
+          console.warn('[DocType] ⚠️ Backend says FACTURA but missing critical data. Falling back to local rules.')
+          ai = classifyDocType({
+            seller_tax_id: normForClassification.seller_tax_id || normForClassification.tax_id,
+            buyer_tax_id: normForClassification.buyer_tax_id,
+            invoice_number: normForClassification.invoice_number,
+            detected_keywords: normForClassification.detected_keywords,
+            ocr_text: normForClassification.ocr_text,
+          })
+          classificationSource = 'LOCAL_FALLBACK'
+        } else {
+          // Backend tiene clasificación válida → USAR SIEMPRE
+          ai = {
+            aiSuggestion: aiBackendType === 'FACTURA' ? 'invoice' : 'ticket',
+            classification_path: 'R1', // Backend tiene la mayor confianza
+          }
+          classificationSource = hasInvoiceData ? 'BACKEND_VALIDATED' : 'BACKEND_EXPLICIT'
         }
       } else {
+        // Caso 3: Backend no dio nada → usar reglas locales
         ai = classifyDocType({
           seller_tax_id: normForClassification.seller_tax_id || normForClassification.tax_id,
           buyer_tax_id: normForClassification.buyer_tax_id,
@@ -543,11 +650,32 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
           detected_keywords: normForClassification.detected_keywords,
           ocr_text: normForClassification.ocr_text,
         })
-
-        if (aiBackendType === 'FACTURA' && ai.aiSuggestion !== 'invoice') {
-          ai = { ...ai, aiSuggestion: 'invoice' }
-        }
+        classificationSource = 'LOCAL_FALLBACK'
       }
+
+      // Logging exhaustivo para debugging
+      console.log('[DocType] 🎯 FINAL CLASSIFICATION DECISION:', {
+        source: classificationSource,
+        finalType: ai.aiSuggestion === 'invoice' ? 'FACTURA' : 'TICKET',
+        path: ai.classification_path,
+        backendSaid: aiBackendType || 'N/A',
+        confidence: {
+          hasInvoiceNumber: !!normForClassification.invoice_number,
+          hasTwoTaxIds: !!(normForClassification.seller_tax_id && normForClassification.buyer_tax_id),
+          hasOcrKeywords: !!(
+            normForClassification.ocr_text?.toLowerCase().includes('factura') ||
+            normForClassification.ocr_text?.toLowerCase().includes('invoice')
+          ),
+          ocrTextLength: normForClassification.ocr_text?.length || 0
+        },
+        extractedFields: {
+          vendor: norm.vendor,
+          invoice_number: normForClassification.invoice_number,
+          seller_tax_id: normForClassification.seller_tax_id,
+          buyer_tax_id: normForClassification.buyer_tax_id,
+          amount_gross: norm.amount_gross
+        }
+      })
 
       if (DEBUG_DOC_TYPE) {
         const payload = (aiData?.data ?? aiData) as Record<string, unknown>
@@ -589,11 +717,7 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
       setAiClassification(ai)
       setDocType(ai.aiSuggestion === 'invoice' ? 'FACTURA' : 'TICKET')
 
-      const proposed = (norm.category_guess || norm.category_suggestion || '').trim()
-      const mappedCatId = mapCategoryNameToId(proposed)
-      const exactId = exactCategoryIdByName(proposed)
-
-      // Pre-rellenar datos del formulario
+      // Pre-rellenar datos del formulario (SIN tocar categoría ni proyecto)
       setFormData((prev) => ({
         ...prev,
         vendor: norm.vendor || prev.vendor,
@@ -603,22 +727,17 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         amount_gross: (norm.amount_gross ?? prev.amount_gross)?.toString?.() || prev.amount_gross,
         currency: norm.currency || prev.currency,
         notes: prev.notes || norm.notes || '',
-        category_id: mappedCatId || prev.category_id,
+        category_id: prev.category_id,  // ✅ Mantener siempre la del usuario
+        project_code_id: prev.project_code_id,  // ✅ Mantener siempre la del usuario
         invoice_number: norm.invoice_number || prev.invoice_number,
         company_tax_id: norm.tax_id || norm.seller_tax_id || prev.company_tax_id,
         company_address: norm.address || prev.company_address,
         company_email: norm.email || prev.company_email,
       }))
 
-      // Si la propuesta no existe EXACTA y mapeó a fallback → abrir modal
-      const needPrompt = !!proposed && !exactId && mappedCatId === fallbackCategoryId
-      if (needPrompt) {
-        setCategoryProposedName(proposed)
-        setCategoryPromptOpen(true)
-        setModalOpen(false)
-      } else {
-        setStep('review'); setModalOpen(false)
-      }
+      // Ir directamente a review sin lógica de categoría
+      setStep('review')
+      setModalOpen(false)
     } catch (error: any) {
       const msg: string = String(error?.message || error)
       if (msg.startsWith('UPLOAD_FAILED')) toast.error('No se pudo subir el archivo', { description: msg })
@@ -632,23 +751,20 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
   const handleCreateCategory = async () => {
     const name = categoryProposedName.trim()
     if (!name) { toast.error('El nombre de la categoría no puede estar vacío'); return }
-    if (!account?.can_add_custom_categories) {
-      toast.error('Tu plan actual no permite crear nuevas categorías automáticamente')
-      return
-    }
+    // Remove plan check - just try to create the category
     if (!accountId) {
       toast.error('No se pudo asociar la categoría con tu cuenta')
       return
     }
     setCreatingCategory(true)
     try {
-      const base: TablesInsert<'categories'> & { status?: 'ACTIVE' | 'INACTIVE' } = { name, account_id: accountId, status: 'ACTIVE' }
+      const base: TablesInsert<'categories'> & { status?: 'ACTIVE' | 'INACTIVE' } = { name, company_id: accountId, status: 'ACTIVE' }
       const { data, error } = await supabase.from('categories').insert(base).select('*').single()
       let createdCategory = data
 
       if (error) {
         // Reintento sin columna status
-        const base2: TablesInsert<'categories'> = { name, account_id: accountId }
+        const base2: TablesInsert<'categories'> = { name, company_id: accountId }
         const { data: fallbackData, error: fallbackError } = await supabase
           .from('categories')
           .insert(base2)
@@ -685,6 +801,71 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
     setStep('review')
   }
 
+  // Crear categoría desde el formulario de revisión
+  const handleCreateCategoryFromReview = async () => {
+    const name = newCategoryName.trim()
+    if (!name) {
+      toast.error('El nombre de la categoría no puede estar vacío')
+      return
+    }
+    
+    if (!accountId) {
+      toast.error('No se pudo asociar la categoría con tu cuenta')
+      return
+    }
+    
+    setCreatingCategory(true)
+    try {
+      const base: TablesInsert<'categories'> & { status?: 'ACTIVE' | 'INACTIVE' } = {
+        name,
+        company_id: accountId,
+        budget_monthly: newCategoryBudget ? parseFloat(newCategoryBudget) : null,
+        status: 'ACTIVE'
+      }
+      
+      const { data, error } = await supabase
+        .from('categories')
+        .insert(base)
+        .select('*')
+        .single()
+      
+      let createdCategory = data
+
+      if (error) {
+        // Reintento sin columna status
+        const base2: TablesInsert<'categories'> = {
+          name,
+          company_id: accountId,
+          budget_monthly: newCategoryBudget ? parseFloat(newCategoryBudget) : null
+        }
+        const { data: fallbackData, error: fallbackError } = await supabase
+          .from('categories')
+          .insert(base2)
+          .select('*')
+          .single()
+
+        if (fallbackError) throw fallbackError
+        createdCategory = fallbackData
+      }
+
+      if (!createdCategory) {
+        throw new Error('CATEGORY_NOT_CREATED')
+      }
+
+      // Actualizar listas y formulario
+      setCategoriesList((prev) => sortCategories([...(prev || []).filter((c) => c.id !== createdCategory.id), createdCategory]))
+      setFormData((p) => ({ ...p, category_id: createdCategory.id }))
+      toast.success('Categoría creada y seleccionada')
+      setReviewCategoryDialogOpen(false)
+      setNewCategoryName('')
+      setNewCategoryBudget('')
+    } catch (e: any) {
+      toast.error('No se pudo crear la categoría', { description: e?.message })
+    } finally {
+      setCreatingCategory(false)
+    }
+  }
+
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!user) return
@@ -703,15 +884,47 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
       const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer)
       const hashHex = Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, '0')).join('')
 
-      let categoryId = formData.category_id
-      const exists = categories_list.some((c) => c.id === categoryId)
-      if (!exists) {
-        const remapped = mapCategoryNameToId(extractedData?.category_suggestion || extractedData?.category_guess || '')
-        if (remapped) categoryId = remapped
+      // Validar que company_id no sea null
+      if (!accountId) {
+        toast.error('No se pudo identificar tu empresa. Por favor, recarga la página.')
+        setUploading(false)
+        return
       }
-      if (!categoryId) { toast.error('Selecciona una categoría válida'); setUploading(false); return }
 
-      const effectiveEmployeeId = formData.employee_id || (selfEmployee?.id as string | undefined) || (user.id as string)
+      // Validar categoría solo si no es plan Free
+      let categoryId = formData.category_id
+      if (companyPlan !== 'free') {
+        const exists = categories_list.some((c) => c.id === categoryId)
+        if (!exists || !categoryId) { 
+          toast.error('Selecciona una categoría válida')
+          setUploading(false)
+          return 
+        }
+        
+        // Validar coherencia: categoría pertenece a la company actual
+        const category = categories_list.find(c => c.id === categoryId)
+        if (category && category.company_id !== accountId) {
+          toast.error('La categoría seleccionada no pertenece a tu empresa')
+          setUploading(false)
+          return
+        }
+      } else {
+        // Plan Free: categoría no requerida
+        categoryId = null
+      }
+      
+      // Validar coherencia: project_code pertenece a la company actual
+      if (formData.project_code_id && accountId) {
+        const project = projects_list.find(p => p.id === formData.project_code_id)
+        if (project && project.company_id !== accountId) {
+          toast.error('El proyecto seleccionado no pertenece a tu empresa')
+          setUploading(false)
+          return
+        }
+      }
+
+      // CRÍTICO: employee_id debe ser el user_id del usuario actual para pasar RLS
+      const effectiveEmployeeId = user.id
 
       // NUEVO: decidir doc_type final respetando la elección del usuario
       const userChoiceLower: DocTypeAI | undefined = docType ? (docType === 'FACTURA' ? 'invoice' : 'ticket') : undefined
@@ -727,11 +940,12 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
       // Seguimos guardando el viejo campo `type` (UI/legacy) para compatibilidad
       const legacyType = doc_type === 'invoice' ? 'FACTURA' : 'TICKET'
 
+      // Auto-aprobar gastos del owner
+      const isOwner = membership?.role === 'owner'
+      const autoApprove = isOwner
+
       const payload: any = {
-        user_id: user.id, // satisface RLS (exp_insert_own)
         employee_id: effectiveEmployeeId,
-        project_code_id: formData.project_code_id || null,
-        category_id: categoryId,
         vendor: formData.vendor,
         expense_date: formData.expense_date,
         amount_net: Number(formData.amount_net || 0),
@@ -740,27 +954,40 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         currency: formData.currency,
         payment_method: formData.payment_method,
         notes: formData.notes,
-        account_id: accountId,
+        company_id: accountId,
         receipt_file_id: receiptFileId,
         source: extractedData ? 'AI_EXTRACTED' : 'MANUAL',
         hash_dedupe: hashHex,
-        status: 'SUBMITTED',
+        status: autoApprove ? 'APPROVED' : 'PENDING', // ✅ Auto-aprobar si es owner
         // NUEVO
         doc_type, // 'ticket' | 'invoice'
         doc_type_source, // 'ai' | 'user'
         classification_path, // 'R1' | 'R2' | 'R3' | 'R4'
-        type: legacyType, // compatibilidad
       }
 
-      if (legacyType === 'FACTURA') {
-        const extra = {
-          invoice_number: formData.invoice_number || extractedData?.invoice_number,
-          company_tax_id: formData.company_tax_id || extractedData?.tax_id || extractedData?.seller_tax_id,
-          company_address: formData.company_address || extractedData?.address,
-          company_email: formData.company_email || extractedData?.email,
-        }
-        for (const [k, v] of Object.entries(extra)) (payload as any)[k] = v ?? null
+      // Solo agregar project_code_id y category_id si NO es plan Free
+      if (companyPlan !== 'free') {
+        payload.project_code_id = formData.project_code_id || null
+        payload.category_id = categoryId || null
+      } else {
+        // En Free, explícitamente null
+        payload.project_code_id = null
+        payload.category_id = null
       }
+
+      console.log('[ReceiptUpload] 📝 About to INSERT expense:', {
+        company_id: payload.company_id,
+        category_id: payload.category_id,
+        employee_id: payload.employee_id,
+        doc_type: payload.doc_type,
+        status: payload.status,
+        amount_gross: payload.amount_gross,
+        hasReceiptFile: !!payload.receipt_file_id,
+        plan: companyPlan
+      })
+
+      // NOTE: Los campos de factura (invoice_number, company_tax_id, company_address, company_email)
+      // no se almacenan en la tabla expenses - solo se usan para revisión en el formulario
 
       // Intento 1: con columnas nuevas
       const insertResult = await supabase
@@ -784,7 +1011,21 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         expenseId = r2.data?.id ?? expenseId
       }
 
-      if (expenseError) throw expenseError
+      if (expenseError) {
+        console.error('[ReceiptUpload] ❌ Error al insertar gasto:', {
+          error: expenseError,
+          code: expenseError.code,
+          message: expenseError.message,
+          details: expenseError.details,
+          hint: expenseError.hint,
+          payload: {
+            employee_id: payload.employee_id,
+            company_id: payload.company_id,
+            user_id: user.id
+          }
+        })
+        throw expenseError
+      }
 
       if (expenseId) {
         const auditPayload: TablesInsert<'audit_logs'> = {
@@ -799,9 +1040,114 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         if (auditError) {
           console.warn('[ReceiptUpload] Failed to write audit log', auditError)
         }
+
+        // Subir archivo a Dropbox después de que el gasto esté en la BD
+        console.log('[ReceiptUpload] 📤 Intentando subir a Dropbox...', {
+          receiptFileId,
+          expenseId,
+          accountId,
+          effectiveEmployeeId,
+          department_id: membership?.department_id
+        })
+        
+        if (receiptFileId && expenseId) {
+          try {
+            // Obtener info del archivo desde receipt_files
+            const { data: fileData, error: fileError } = await supabase
+              .from('receipt_files')
+              .select('path, original_name')
+              .eq('id', receiptFileId)
+              .single()
+
+            if (fileError) {
+              console.error('[ReceiptUpload] ❌ Error obteniendo info del archivo:', fileError)
+              throw fileError
+            }
+
+            if (!fileData?.path) {
+              console.warn('[ReceiptUpload] ⚠️ No se encontró path del archivo')
+              return
+            }
+
+            console.log('[ReceiptUpload] 📁 Archivo encontrado:', {
+              path: fileData.path,
+              originalName: fileData.original_name
+            })
+
+            // Obtener URL pública del archivo
+            const { data: urlData } = supabase.storage
+              .from('receipts')
+              .getPublicUrl(fileData.path)
+
+            console.log('[ReceiptUpload] 🔗 URL pública obtenida:', urlData.publicUrl)
+
+            // Llamar a la edge function para subir a Dropbox
+            console.log('[ReceiptUpload] 🚀 Invocando edge function upload-to-dropbox...')
+            const dropboxResponse = await supabase.functions.invoke('upload-to-dropbox', {
+              body: {
+                file_url: urlData.publicUrl,
+                file_name: fileData.original_name || file.name,
+                company_id: accountId,
+                user_id: effectiveEmployeeId,
+                department_id: membership?.department_id,
+                project_code_id: formData.project_code_id,
+                category_id: formData.category_id,
+                expense_date: formData.expense_date,
+                vendor: formData.vendor,
+              }
+            })
+
+            console.log('[ReceiptUpload] 📦 Respuesta de Dropbox:', {
+              data: dropboxResponse.data,
+              error: dropboxResponse.error,
+              status: dropboxResponse.error ? 'ERROR' : 'SUCCESS'
+            })
+
+            if (dropboxResponse.error) {
+              console.error('[ReceiptUpload] ❌ Error en respuesta de Dropbox:', dropboxResponse.error)
+              toast.error('Error al subir a Dropbox', {
+                description: dropboxResponse.error.message || 'Error desconocido'
+              })
+              return
+            }
+
+            if (dropboxResponse.data?.dropbox_path) {
+              // Actualizar el expense con la información de Dropbox
+              const { error: updateError } = await supabase
+                .from('expenses')
+                .update({
+                  dropbox_path: dropboxResponse.data.dropbox_path,
+                  dropbox_url: dropboxResponse.data.dropbox_url,
+                  classification_path: dropboxResponse.data.classification_path,
+                })
+                .eq('id', expenseId)
+
+              if (updateError) {
+                console.error('[ReceiptUpload] ❌ Error actualizando gasto con info de Dropbox:', updateError)
+                toast.error('Error al actualizar con info de Dropbox')
+              } else {
+                console.log('[ReceiptUpload] ✅ Archivo subido a Dropbox:', dropboxResponse.data.dropbox_path)
+                toast.success('Archivo subido a Dropbox', {
+                  description: dropboxResponse.data.dropbox_path
+                })
+              }
+            }
+          } catch (dropboxError: any) {
+            console.error('[ReceiptUpload] ❌ Error en proceso de Dropbox:', dropboxError)
+            toast.error('Error al subir a Dropbox', {
+              description: dropboxError?.message || 'Error desconocido'
+            })
+            // No fallar el proceso principal si falla Dropbox
+          }
+        } else {
+          console.warn('[ReceiptUpload] ⚠️ No se puede subir a Dropbox: receiptFileId o expenseId faltantes', {
+            receiptFileId,
+            expenseId
+          })
+        }
       }
 
-      toast.success('Gasto enviado para aprobación')
+      toast.success(autoApprove ? 'Gasto registrado y aprobado automáticamente' : 'Gasto enviado para aprobación')
       if (limitApplies) {
         setMonthlyUsage((current) => {
           if (typeof current === 'number') {
@@ -815,7 +1161,10 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         })
       }
       onUploadComplete?.()
-    } catch (err: any) { toast.error('No se pudo crear el gasto', { description: err?.message }) }
+    } catch (err: any) { 
+      console.error('[ReceiptUpload] ❌ Error en handleFormSubmit:', err)
+      toast.error('No se pudo crear el gasto', { description: err?.message || 'Error desconocido' })
+    }
     finally { setUploading(false) }
   }
 
@@ -881,12 +1230,23 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
                 <Label className="flex items-center gap-2">Categoría *</Label>
-                <Select value={formData.category_id} onValueChange={(v) => setFormData((p) => ({ ...p, category_id: v }))}>
-                  <SelectTrigger><SelectValue placeholder="Seleccionar categoría" /></SelectTrigger>
-                  <SelectContent>
-                    {categories_list.map((c) => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}
-                  </SelectContent>
-                </Select>
+                <div className="flex gap-2">
+                  <Select value={formData.category_id} onValueChange={(v) => setFormData((p) => ({ ...p, category_id: v }))}>
+                    <SelectTrigger><SelectValue placeholder="Seleccionar categoría" /></SelectTrigger>
+                    <SelectContent>
+                      {categories_list.map((c) => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}
+                    </SelectContent>
+                  </Select>
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    size="icon"
+                    onClick={() => setReviewCategoryDialogOpen(true)}
+                    title="Crear nueva categoría"
+                  >
+                    <Tag className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -1025,7 +1385,11 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Confirmar datos básicos</DialogTitle>
-            <DialogDescription>Completa Empleado, Código de proyecto y Notas. Al confirmar, se subirá y analizará el ticket.</DialogDescription>
+            <DialogDescription>
+              {companyPlan === 'free' 
+                ? 'Completa los datos básicos. Al confirmar, se subirá y analizará el ticket.'
+                : 'Completa Empleado, Código de proyecto, Categoría y Notas. Al confirmar, se subirá y analizará el ticket.'}
+            </DialogDescription>
           </DialogHeader>
 
           {filePreview && (<div className="flex justify-center mb-4"><img src={filePreview} alt="Preview" className="max-h-48 rounded-md border" /></div>)}
@@ -1043,15 +1407,31 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
               ) : (<Input value={displayName} disabled />)}
             </div>
 
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2"><Hash className="h-4 w-4" /> Código de Proyecto</Label>
-              <Select value={formData.project_code_id} onValueChange={(v) => setFormData((p) => ({ ...p, project_code_id: v }))}>
-                <SelectTrigger><SelectValue placeholder="Seleccionar proyecto (opcional)" /></SelectTrigger>
-                <SelectContent>
-                  {projects_list.map((project) => (<SelectItem key={project.id} value={project.id}>{project.code} - {project.name}</SelectItem>))}
-                </SelectContent>
-              </Select>
-            </div>
+            {/* Proyecto: solo para Pro/Enterprise */}
+            {companyPlan !== 'free' && (
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2"><Hash className="h-4 w-4" /> Código de Proyecto</Label>
+                <Select value={formData.project_code_id} onValueChange={(v) => setFormData((p) => ({ ...p, project_code_id: v }))}>
+                  <SelectTrigger><SelectValue placeholder="Seleccionar proyecto (opcional)" /></SelectTrigger>
+                  <SelectContent>
+                    {projects_list.map((project) => (<SelectItem key={project.id} value={project.id}>{project.code} - {project.name}</SelectItem>))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Categoría: solo para Pro/Enterprise */}
+            {companyPlan !== 'free' && (
+              <div className="space-y-2 md:col-span-2">
+                <Label className="flex items-center gap-2"><Tag className="h-4 w-4" /> Categoría *</Label>
+                <Select value={formData.category_id} onValueChange={(v) => setFormData((p) => ({ ...p, category_id: v }))}>
+                  <SelectTrigger><SelectValue placeholder="Seleccionar categoría" /></SelectTrigger>
+                  <SelectContent>
+                    {categories_list.map((cat) => (<SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div className="space-y-2 md:col-span-2">
               <Label htmlFor="notes"><Tag className="h-4 w-4 inline mr-1" /> Notas</Label>
@@ -1100,6 +1480,65 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
             )}
             <Button type="button" onClick={handleCreateCategory} disabled={creatingCategory}>
               {creatingCategory ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creando…</>) : ('Crear y usar')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: crear categoría desde el formulario de revisión */}
+      <Dialog open={reviewCategoryDialogOpen} onOpenChange={(o) => setReviewCategoryDialogOpen(o)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Tag className="h-5 w-5" /> Nueva Categoría</DialogTitle>
+            <DialogDescription>
+              Crea una nueva categoría de gasto. Se seleccionará automáticamente después de crearla.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="newCategoryName">Nombre de la categoría *</Label>
+              <Input 
+                id="newCategoryName" 
+                value={newCategoryName} 
+                onChange={(e) => setNewCategoryName(e.target.value)} 
+                placeholder="Ej. Material de oficina" 
+                autoFocus
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="newCategoryBudget">Presupuesto mensual (opcional)</Label>
+              <Input 
+                id="newCategoryBudget" 
+                type="number" 
+                step="0.01"
+                value={newCategoryBudget} 
+                onChange={(e) => setNewCategoryBudget(e.target.value)} 
+                placeholder="0.00" 
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-3">
+            <Button 
+              type="button" 
+              variant="outline" 
+              onClick={() => {
+                setReviewCategoryDialogOpen(false)
+                setNewCategoryName('')
+                setNewCategoryBudget('')
+              }}
+              disabled={creatingCategory}
+            >
+              Cancelar
+            </Button>
+            <Button 
+              type="button" 
+              onClick={handleCreateCategoryFromReview} 
+              disabled={creatingCategory || !newCategoryName.trim()}
+            >
+              {creatingCategory ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creando…</>) : ('Crear categoría')}
             </Button>
           </DialogFooter>
         </DialogContent>
