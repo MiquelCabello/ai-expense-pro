@@ -251,8 +251,13 @@ Deno.serve(async (req) => {
 
     if (!uploadResponse.ok) {
       const errorText = await uploadResponse.text()
-      console.error('[upload-to-dropbox] Dropbox upload failed:', errorText)
-      throw new Error(`Dropbox upload failed: ${errorText}`)
+      console.error('[upload-to-dropbox] Dropbox upload failed:', {
+        status: uploadResponse.status,
+        statusText: uploadResponse.statusText,
+        headers: Object.fromEntries(uploadResponse.headers.entries()),
+        body: errorText,
+      })
+      throw new Error(`Dropbox upload failed (${uploadResponse.status}): ${errorText || uploadResponse.statusText}`)
     }
 
     const uploadResult = await uploadResponse.json()
