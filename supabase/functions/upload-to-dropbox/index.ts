@@ -1,5 +1,5 @@
 // Edge Function: upload-to-dropbox
-// Sube archivos a Dropbox organizándolos por grupo empresarial, empresa, departamento y empleado
+// Sube archivos a Dropbox con estructura jerárquica de 9 niveles
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -12,11 +12,22 @@ interface UploadRequest {
   company_id: string
   user_id: string
   department_id?: string
+  project_code_id: string
+  category_id: string
+  expense_date: string
+  vendor: string
 }
 
 interface DropboxUploadResponse {
   dropbox_path: string
   dropbox_url?: string
+  classification_path?: string
+}
+
+interface DropboxTokenResponse {
+  access_token: string
+  token_type: string
+  expires_in: number
 }
 
 Deno.serve(async (req) => {
@@ -28,11 +39,38 @@ Deno.serve(async (req) => {
   try {
     console.log('[upload-to-dropbox] Function invoked')
     
-    const DROPBOX_ACCESS_TOKEN = Deno.env.get('DROPBOX_ACCESS_TOKEN')
-    if (!DROPBOX_ACCESS_TOKEN) {
-      console.error('[upload-to-dropbox] DROPBOX_ACCESS_TOKEN not configured')
-      throw new Error('DROPBOX_ACCESS_TOKEN not configured')
+    // Verificar que tenemos los secrets necesarios
+    const DROPBOX_APP_KEY = Deno.env.get('DROPBOX_APP_KEY')
+    const DROPBOX_APP_SECRET = Deno.env.get('DROPBOX_APP_SECRET')
+    const DROPBOX_REFRESH_TOKEN = Deno.env.get('DROPBOX_REFRESH_TOKEN')
+    
+    if (!DROPBOX_APP_KEY || !DROPBOX_APP_SECRET || !DROPBOX_REFRESH_TOKEN) {
+      console.error('[upload-to-dropbox] Missing Dropbox configuration')
+      throw new Error('Dropbox configuration not complete')
     }
+
+    // Refrescar el token de acceso
+    console.log('[upload-to-dropbox] Refreshing access token...')
+    const authString = btoa(`${DROPBOX_APP_KEY}:${DROPBOX_APP_SECRET}`)
+    
+    const tokenResponse = await fetch('https://api.dropbox.com/oauth2/token', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${authString}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: `grant_type=refresh_token&refresh_token=${DROPBOX_REFRESH_TOKEN}`,
+    })
+
+    if (!tokenResponse.ok) {
+      const errorText = await tokenResponse.text()
+      console.error('[upload-to-dropbox] Token refresh failed:', errorText)
+      throw new Error(`Failed to refresh Dropbox token: ${errorText}`)
+    }
+
+    const tokenData: DropboxTokenResponse = await tokenResponse.json()
+    const DROPBOX_ACCESS_TOKEN = tokenData.access_token
+    console.log('[upload-to-dropbox] Access token refreshed successfully')
 
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -41,12 +79,26 @@ Deno.serve(async (req) => {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
     const body: UploadRequest = await req.json()
-    const { file_url, file_name, company_id, user_id, department_id } = body
+    const { 
+      file_url, 
+      file_name, 
+      company_id, 
+      user_id, 
+      department_id,
+      project_code_id,
+      category_id,
+      expense_date,
+      vendor
+    } = body
 
     console.log('[upload-to-dropbox] Processing upload:', { 
       company_id, 
       user_id, 
       department_id,
+      project_code_id,
+      category_id,
+      expense_date,
+      vendor,
       file_name,
       file_url: file_url.substring(0, 50) + '...'
     })
@@ -104,24 +156,75 @@ Deno.serve(async (req) => {
       }
     }
 
-    // 5. Construir la ruta de Dropbox
+    // 5. Obtener nombre del código de proyecto
+    const { data: projectCode, error: projectError } = await supabase
+      .from('project_codes')
+      .select('code, name')
+      .eq('id', project_code_id)
+      .single()
+
+    if (projectError || !projectCode) {
+      console.error('[upload-to-dropbox] Error fetching project code:', projectError)
+      throw new Error('Project code not found')
+    }
+
+    // 6. Obtener nombre de la categoría
+    const { data: category, error: categoryError } = await supabase
+      .from('categories')
+      .select('name')
+      .eq('id', category_id)
+      .single()
+
+    if (categoryError || !category) {
+      console.error('[upload-to-dropbox] Error fetching category:', categoryError)
+      throw new Error('Category not found')
+    }
+
+    // 7. Calcular año y trimestre
+    const expenseDate = new Date(expense_date)
+    const year = expenseDate.getFullYear().toString()
+    const month = expenseDate.getMonth() + 1
+    const quarter = `Q${Math.ceil(month / 3)}`
+
+    // 8. Construir la ruta jerárquica de 9 niveles
     const pathParts = []
     
+    // Nivel 1: Grupo empresarial (si existe)
     if (groupName) {
       pathParts.push(sanitizeFolderName(groupName))
     }
     
+    // Nivel 2: Empresa (obligatorio)
     pathParts.push(sanitizeFolderName(company.name))
     
+    // Nivel 3: Departamento (si existe)
     if (departmentName) {
       pathParts.push(sanitizeFolderName(departmentName))
     }
     
+    // Nivel 4: Empleado (obligatorio)
     pathParts.push(sanitizeFolderName(employeeName))
+    
+    // Nivel 5: Código de proyecto (obligatorio)
+    pathParts.push(sanitizeFolderName(projectCode.code))
+    
+    // Nivel 6: Categoría (obligatorio)
+    pathParts.push(sanitizeFolderName(category.name))
+    
+    // Nivel 7: Año (obligatorio)
+    pathParts.push(year)
+    
+    // Nivel 8: Trimestre (obligatorio)
+    pathParts.push(quarter)
+    
+    // Nivel 9: Comercio/Vendor (obligatorio)
+    pathParts.push(sanitizeFolderName(vendor))
 
     const dropboxPath = `/${pathParts.join('/')}/${file_name}`
+    const classificationPath = pathParts.join('/')
 
     console.log('[upload-to-dropbox] Uploading to:', dropboxPath)
+    console.log('[upload-to-dropbox] Classification path:', classificationPath)
 
     // 6. Descargar el archivo desde Supabase Storage
     const fileResponse = await fetch(file_url)
@@ -202,6 +305,7 @@ Deno.serve(async (req) => {
     const response: DropboxUploadResponse = {
       dropbox_path: dropboxPath,
       dropbox_url: shareUrl,
+      classification_path: classificationPath,
     }
 
     return new Response(JSON.stringify(response), {

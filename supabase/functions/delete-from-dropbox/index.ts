@@ -19,11 +19,38 @@ Deno.serve(async (req) => {
   try {
     console.log('[delete-from-dropbox] Function invoked')
     
-    const DROPBOX_ACCESS_TOKEN = Deno.env.get('DROPBOX_ACCESS_TOKEN')
-    if (!DROPBOX_ACCESS_TOKEN) {
-      console.error('[delete-from-dropbox] DROPBOX_ACCESS_TOKEN not configured')
-      throw new Error('DROPBOX_ACCESS_TOKEN not configured')
+    // Verificar que tenemos los secrets necesarios
+    const DROPBOX_APP_KEY = Deno.env.get('DROPBOX_APP_KEY')
+    const DROPBOX_APP_SECRET = Deno.env.get('DROPBOX_APP_SECRET')
+    const DROPBOX_REFRESH_TOKEN = Deno.env.get('DROPBOX_REFRESH_TOKEN')
+    
+    if (!DROPBOX_APP_KEY || !DROPBOX_APP_SECRET || !DROPBOX_REFRESH_TOKEN) {
+      console.error('[delete-from-dropbox] Missing Dropbox configuration')
+      throw new Error('Dropbox configuration not complete')
     }
+
+    // Refrescar el token de acceso
+    console.log('[delete-from-dropbox] Refreshing access token...')
+    const authString = btoa(`${DROPBOX_APP_KEY}:${DROPBOX_APP_SECRET}`)
+    
+    const tokenResponse = await fetch('https://api.dropbox.com/oauth2/token', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${authString}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: `grant_type=refresh_token&refresh_token=${DROPBOX_REFRESH_TOKEN}`,
+    })
+
+    if (!tokenResponse.ok) {
+      const errorText = await tokenResponse.text()
+      console.error('[delete-from-dropbox] Token refresh failed:', errorText)
+      throw new Error(`Failed to refresh Dropbox token: ${errorText}`)
+    }
+
+    const tokenData = await tokenResponse.json()
+    const DROPBOX_ACCESS_TOKEN = tokenData.access_token
+    console.log('[delete-from-dropbox] Access token refreshed successfully')
 
     const body: DeleteRequest = await req.json()
     const { dropbox_path } = body

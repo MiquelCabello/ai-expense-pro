@@ -1090,6 +1090,10 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
                 company_id: accountId,
                 user_id: effectiveEmployeeId,
                 department_id: membership?.department_id,
+                project_code_id: formData.project_code_id,
+                category_id: formData.category_id,
+                expense_date: formData.expense_date,
+                vendor: formData.vendor,
               }
             })
 
@@ -1114,6 +1118,7 @@ export default function ReceiptUpload({ onUploadComplete }: ReceiptUploadProps) 
                 .update({
                   dropbox_path: dropboxResponse.data.dropbox_path,
                   dropbox_url: dropboxResponse.data.dropbox_url,
+                  classification_path: dropboxResponse.data.classification_path,
                 })
                 .eq('id', expenseId)
 
